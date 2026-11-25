@@ -29,7 +29,13 @@ import org.junit.Test
 
 @UnstableApi
 class PlaybackGaplessTest {
-    @Test fun taggedFlacToUntaggedFlacChangesGainAtTheDecodedBoundaryWithContinuousEqualizer() {
+    @Test fun taggedFlacToUntaggedFlacChangesGainAtTheDecodedBoundaryWithContinuousEqualizer() =
+        verifyFlacBoundary(null)
+
+    @Test fun measuredFlacGainReachesTheDecoderAtTheGaplessBoundary() =
+        verifyFlacBoundary(ServerLoudness(4.25, .25))
+
+    private fun verifyFlacBoundary(measurement: ServerLoudness?) {
         val hasDecoder = MediaCodecUtil.getDecoderInfos(MimeTypes.AUDIO_FLAC, false, false).isNotEmpty()
         if (Build.VERSION.SDK_INT < 27) {
             assumeTrue("Android 8.0 permits devices without a FLAC MediaCodec", hasDecoder)
@@ -43,7 +49,7 @@ class PlaybackGaplessTest {
         val expected = ByteBuffer.allocate(48_000 * 2).order(ByteOrder.nativeOrder())
         val reference = PlaybackToneProcessor()
         repeat(2) { track ->
-            reference.configure(48_000, 1, if (track == 0) ReplayGainTags(trackGainDb = -6.020599913) else ReplayGainTags(), preferences.value)
+            reference.configure(48_000, 1, if (track == 0) ReplayGainTags(trackGainDb = -6.020599913) else ReplayGainTags(measurement?.gainDb, measurement?.truePeak), preferences.value)
             repeat(24_000) { index ->
                 val frame = doubleArrayOf((((index + track * 24_000) * 311 % 16_001) - 8_000) / 32768.0)
                 reference.processFrame(frame)
@@ -86,7 +92,7 @@ class PlaybackGaplessTest {
                         }
                         override fun onPlayerError(failure: PlaybackException) { error.set(failure); ended.countDown() }
                     })
-                    it.setMediaItems(files.mapIndexed { index, file -> MediaItem.Builder().setMediaId("flac-$index").setUri(file.toURI().toString()).build() })
+                    it.setMediaItems(files.mapIndexed { index, file -> MediaItem.Builder().setMediaId("flac-$index").setUri(file.toURI().toString()).setTag(measurement).build() })
                     it.prepare()
                     it.play()
                 })

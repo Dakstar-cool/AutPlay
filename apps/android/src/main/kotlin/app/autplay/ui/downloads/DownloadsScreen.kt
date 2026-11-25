@@ -13,6 +13,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.media3.exoplayer.offline.DownloadManager
+import androidx.media3.exoplayer.scheduler.Requirements
+import app.autplay.download.MediaDownloadComponents
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -32,8 +41,10 @@ data class DownloadsUiActions(
     val cancel: (DownloadIntentPresentation) -> Unit = {},
     val retry: (DownloadIntentPresentation) -> Unit = {},
     val downloadSelected: () -> Unit = {},
+    val allowMetered: () -> Unit = {},
 )
 
+@androidx.media3.common.util.UnstableApi
 @Composable
 fun DownloadsScreen(
     downloads: List<DownloadIntentPresentation>,
@@ -42,6 +53,19 @@ fun DownloadsScreen(
     actions: DownloadsUiActions,
     contentPadding: PaddingValues,
 ) {
+    val context = LocalContext.current
+    val manager = remember(context) { MediaDownloadComponents.get(context).downloadManager }
+    var unmet by remember(manager) { mutableIntStateOf(manager.notMetRequirements) }
+    DisposableEffect(manager) {
+        val listener = object : DownloadManager.Listener {
+            override fun onRequirementsStateChanged(manager: DownloadManager, requirements: Requirements, notMetRequirements: Int) {
+                unmet = notMetRequirements
+            }
+        }
+        manager.addListener(listener)
+        unmet = manager.notMetRequirements
+        onDispose { manager.removeListener(listener) }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("downloads-list"),
         contentPadding = PaddingValues(
@@ -59,6 +83,16 @@ fun DownloadsScreen(
                 enabled = canDownloadSelected,
                 onClick = actions.downloadSelected,
             ) { Text(stringResource(R.string.download_selected_track)) }
+        }
+        val waiting = downloads.any { it.state == "QUEUED" || it.state == "REQUESTED" }
+        if (waiting && unmet != 0) item("download-network") {
+            Column {
+                val needsNetwork = unmet and Requirements.NETWORK != 0
+                Text(stringResource(if (needsNetwork) R.string.download_wait_network else R.string.download_wait_unmetered))
+                if (!needsNetwork && unmet and Requirements.NETWORK_UNMETERED != 0) {
+                    OutlinedButton(onClick = actions.allowMetered) { Text(stringResource(R.string.download_allow_metered)) }
+                }
+            }
         }
         if (downloads.isEmpty()) {
             item("downloads-empty") { AutPlayStateSurface(AutPlayStateKind.Empty, stringResource(R.string.downloads_empty)) }

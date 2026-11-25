@@ -8,6 +8,10 @@ internal val variationKinds = setOf("COVER", "REMIX", "LIVE")
 
 private val bracketSuffix = Regex("""\s*[\[(]([^()\[\]]+)[\])]$""")
 private val dashSuffix = Regex("""\s+[-–—]\s+([^-–—]+)$""")
+private val liveLabel = Regex(
+    """live(?: version| performance| session|\s+(?:at|in|from|on)\s+.+)?|концертная(?: версия| запись)?|живое (?:исполнение|выступление)(?: (?:в|на) .+)?""",
+    RegexOption.IGNORE_CASE,
+)
 private val variantLabel = Regex(
     """(?:(?:.+\s+)?(?:remix|cover|ремикс|кавер)|(?:cover|кавер)\s+.+|originally by\s+.+|""" +
         """live(?:\s+(?:at|in|from|version)\b.*)?|(?:acoustic|instrumental|karaoke|demo|slowed|sped up|""" +
@@ -50,23 +54,27 @@ internal fun waveVersion(row: WaveRecordingRow): WaveVersion {
     var base = row.title.orEmpty().trim()
     val labels = mutableListOf<String>()
     row.versionText?.trim()?.let(labels::add)
+    val pipeParts = base.split('|').map { it.trim() }
+    val pipeLabels = pipeParts.drop(1).filter(liveLabel::matches)
+    labels.addAll(pipeLabels)
+    if (pipeLabels.isNotEmpty() && pipeLabels.size == pipeParts.size - 1) base = pipeParts.first()
     while (base.isNotEmpty()) {
         val suffix = bracketSuffix.find(base) ?: dashSuffix.find(base) ?: break
         val label = suffix.groupValues[1].trim()
-        if (!variantLabel.matches(label) && !cleanLabel.matches(label) &&
+        if (!variantLabel.matches(label) && !liveLabel.matches(label) && !cleanLabel.matches(label) &&
             !originalLabel.matches(label) && !presentationLabel.matches(label)) break
         if (suffix.range.first == 0) break
         labels.add(label)
         base = base.take(suffix.range.first).trimEnd()
     }
-    val alternate = row.recordingKind in alternateKinds || labels.any { variantLabel.matches(it) || cleanLabel.matches(it) }
+    val alternate = row.recordingKind in alternateKinds || labels.any { variantLabel.matches(it) || liveLabel.matches(it) || cleanLabel.matches(it) }
     val cover = row.recordingKind == "COVER" || labels.any(coverLabel::containsMatchIn)
     val kind = when {
         row.performanceRole == "VERSION" && row.livePerformance -> "LIVE"
         row.recordingKind in variationKinds -> row.recordingKind
         labels.any { variantLabel.matches(it) && coverLabel.containsMatchIn(it) } -> "COVER"
         labels.any { variantLabel.matches(it) && (it.endsWith("remix", true) || it.endsWith("ремикс", true)) } -> "REMIX"
-        labels.any { variantLabel.matches(it) && (it.startsWith("live", true) || it.startsWith("концертная", true)) } -> "LIVE"
+        labels.any(liveLabel::matches) -> "LIVE"
         else -> null
     }
     if (row.performanceRole == "VERSION") return WaveVersion(true, row.workMbid?.let(::MusicBrainzWork), kind = kind)

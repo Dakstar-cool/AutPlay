@@ -52,6 +52,8 @@ class ServicePlaybackSessionOwner(context: Context) : PlaybackSessionOwner, Wave
             is PlaybackCommand.NextIfCurrent -> intent.setAction(AutPlayPlaybackService.ACTION_NEXT_IF_CURRENT)
                 .putExtra(AutPlayPlaybackService.EXTRA_EXPECTED_QUEUE_ENTRY_ID, command.expectedQueueEntryId.value)
             PlaybackCommand.Previous -> intent.action = AutPlayPlaybackService.ACTION_PREVIOUS
+            is PlaybackCommand.RetryPhoneAudio -> intent.setAction(AutPlayPlaybackService.ACTION_RESUME)
+                .putExtra(AutPlayPlaybackService.EXTRA_EXPECTED_QUEUE_ENTRY_ID, command.expectedEntry.value)
             PlaybackCommand.Resume -> intent.action = AutPlayPlaybackService.ACTION_RESUME
             PlaybackCommand.Pause -> intent.action = AutPlayPlaybackService.ACTION_PAUSE
             PlaybackCommand.Stop -> intent.action = AutPlayPlaybackService.ACTION_STOP
@@ -59,6 +61,8 @@ class ServicePlaybackSessionOwner(context: Context) : PlaybackSessionOwner, Wave
                 .putExtra(AutPlayPlaybackService.EXTRA_POSITION_MS, command.positionMs)
             is PlaybackCommand.SetShuffleEnabled -> intent.setAction(AutPlayPlaybackService.ACTION_SET_SHUFFLE)
                 .putExtra(AutPlayPlaybackService.EXTRA_SHUFFLE_ENABLED, command.enabled)
+            is PlaybackCommand.CycleTrackRepeat -> intent.setAction(AutPlayPlaybackService.ACTION_SET_REPEAT)
+                .putExtra(AutPlayPlaybackService.EXTRA_EXPECTED_QUEUE_ENTRY_ID, command.entryId.value)
             is PlaybackCommand.SetRepeatMode -> intent.setAction(AutPlayPlaybackService.ACTION_SET_REPEAT)
                 .putExtra(AutPlayPlaybackService.EXTRA_REPEAT_MODE, command.mode)
             is PlaybackCommand.ScheduledPlay -> intent.setAction(AutPlayPlaybackService.ACTION_SCHEDULED_PLAY)
@@ -191,6 +195,8 @@ sealed interface PlaybackCommand {
 
     data object Previous : PlaybackCommand
 
+    data class RetryPhoneAudio(val expectedEntry: LocalId) : PlaybackCommand
+
     data object Resume : PlaybackCommand
 
     data object Pause : PlaybackCommand
@@ -204,6 +210,8 @@ sealed interface PlaybackCommand {
     }
 
     data class SetShuffleEnabled(val enabled: Boolean) : PlaybackCommand
+
+    data class CycleTrackRepeat(val entryId: LocalId) : PlaybackCommand
 
     data class SetRepeatMode(val mode: String) : PlaybackCommand {
         init { require(mode in setOf("OFF", "ONE", "ALL")) }

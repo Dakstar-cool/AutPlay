@@ -1,6 +1,7 @@
 package app.autplay.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,7 +30,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -101,6 +101,7 @@ public fun HomePlaybackHero(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     onPrevious: () -> Unit = {},
     onNext: () -> Unit = {},
+    onOpenArtist: (() -> Unit)? = null,
 ) {
     val title = state.title ?: stringResource(R.string.player_nothing_playing)
     val artist = state.artist ?: stringResource(R.string.player_unknown_artist)
@@ -116,23 +117,21 @@ public fun HomePlaybackHero(
     }
     val colors = MaterialTheme.colorScheme
     val bitmap = rememberTrackArtworkBitmap(state.trackId)
-    val coverTint = app.autplay.ui.player.rememberArtworkTint(bitmap) ?: colors.secondary
+    val palette = app.autplay.ui.player.rememberArtworkPalette(bitmap)
+    val coverTint = palette?.dominant ?: colors.secondary
+    val secondaryTint = palette?.accent ?: androidx.compose.ui.graphics.lerp(coverTint, colors.tertiary, .35f)
     Column(
         modifier = modifier.fillMaxWidth().testTag("home-playback-hero")
-            .waveGlow(coverTint, androidx.compose.ui.graphics.lerp(coverTint, colors.tertiary, .35f), colors.background)
+            .waveGlow(coverTint, secondaryTint, colors.background)
             .padding(start = 24.dp, end = 24.dp, top = topChromePadding + 6.dp, bottom = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        HomeHeroHeader(stringResource(when {
-            state.hasActivePlayback && !state.playPauseEnabled -> R.string.home_hero_control_locked
-            state.isPlaying -> R.string.home_hero_playing
-            state.hasActivePlayback -> R.string.home_hero_ready
-            localMode -> R.string.home_wave_on_device
-            else -> R.string.home_hero_personal_flow
-        }), togetherLabel, onOpenListenTogether)
+        HomeHeroHeader(togetherLabel, onOpenListenTogether)
         Spacer(Modifier.height(6.dp))
-        WaveHeadline(artist)
+        WaveHeadline(artist, if (onOpenArtist == null) Modifier else Modifier
+            .testTag("hero-open-artist").clickable(onClickLabel = stringResource(R.string.detail_open_artist),
+                onClick = onOpenArtist))
         Spacer(Modifier.height(8.dp))
         HomeArtworkCarousel(
             title = title, targets = swipeTargets, motion = motion,
@@ -180,6 +179,7 @@ internal fun HomeWaveStartHero(
     onLike: (String) -> Unit,
     onOpenListenTogether: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenArtist: (() -> Unit)? = null,
 ) {
     val colors = MaterialTheme.colorScheme
     val play = stringResource(R.string.home_my_wave)
@@ -189,8 +189,7 @@ internal fun HomeWaveStartHero(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        HomeHeroHeader(stringResource(if (localMode) R.string.home_wave_on_device else R.string.home_hero_personal_flow),
-            stringResource(R.string.nav_wave_rooms), onOpenListenTogether)
+        HomeHeroHeader(stringResource(R.string.nav_wave_rooms), onOpenListenTogether)
         Spacer(Modifier.height(32.dp))
         WaveHeadline(stringResource(R.string.home_my_wave))
         Surface(
@@ -212,7 +211,9 @@ internal fun HomeWaveStartHero(
                         onClick = onResume,
                     )
                     Text(listOfNotNull(state.artist?.takeIf { it.isNotBlank() }, state.title).joinToString(" — "),
-                        Modifier.weight(1f).padding(vertical = 8.dp), textAlign = TextAlign.Center,
+                        Modifier.weight(1f).then(if (onOpenArtist == null) Modifier else
+                            Modifier.testTag("hero-resume-artist").clickable(onClickLabel = stringResource(R.string.detail_open_artist),
+                                onClick = onOpenArtist)).padding(vertical = 8.dp), textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (state.trackId != null) HeroIconButton(
                         icon = if (state.liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
@@ -222,28 +223,28 @@ internal fun HomeWaveStartHero(
                 }
             }
         }
-        if (!enabled) Text(stringResource(if (emptyLibrary) R.string.home_first_track_body else R.string.home_my_wave_locked),
+        if (!enabled && !emptyLibrary) Text(stringResource(R.string.home_my_wave_locked),
             textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
-private fun WaveHeadline(text: String) {
-    Text(text, Modifier.widthIn(max = 540.dp), textAlign = TextAlign.Center,
+private fun WaveHeadline(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier.widthIn(max = 540.dp), textAlign = TextAlign.Center,
         style = MaterialTheme.typography.displaySmall.copy(fontSize = 46.sp, lineHeight = 48.sp,
             fontWeight = FontWeight.Bold, letterSpacing = (-1).sp),
         maxLines = 3, overflow = TextOverflow.Ellipsis)
 }
 
 private fun Modifier.waveGlow(accent: Color, secondary: Color, base: Color): Modifier = drawWithCache {
-    val intensity = if (base.luminance() < .5f) .74f else .36f
+    val intensity = if (base.luminance() < .5f) .94f else .46f
     val warm = Brush.radialGradient(
-        0f to accent.copy(alpha = intensity), .34f to accent.copy(alpha = intensity * .76f), 1f to accent.copy(alpha = 0f),
-        center = Offset(size.width * .38f, size.height * .53f), radius = size.minDimension * .52f,
+        0f to accent.copy(alpha = intensity), .40f to accent.copy(alpha = intensity * .86f), .72f to accent.copy(alpha = intensity * .38f), 1f to accent.copy(alpha = 0f),
+        center = Offset(size.width * .38f, size.height * .53f), radius = size.minDimension * .68f,
     )
     val halo = Brush.radialGradient(
-        listOf(secondary.copy(alpha = intensity * .72f), secondary.copy(alpha = 0f)),
-        center = Offset(size.width * .67f, size.height * .40f), radius = size.minDimension * .54f,
+        0f to secondary.copy(alpha = intensity * .88f), .46f to secondary.copy(alpha = intensity * .7f), 1f to secondary.copy(alpha = 0f),
+        center = Offset(size.width * .72f, size.height * .54f), radius = size.minDimension * .65f,
     )
     val edge = Brush.verticalGradient(0f to base, .16f to base.copy(alpha = 0f),
         .82f to base.copy(alpha = 0f), 1f to base)
@@ -256,46 +257,24 @@ private fun Modifier.waveGlow(accent: Color, secondary: Color, base: Color): Mod
 }
 
 @Composable
-private fun HomeHeroHeader(label: String, togetherLabel: String, onOpen: () -> Unit) {
+private fun HomeHeroHeader(togetherLabel: String, onOpen: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val fontScale = LocalDensity.current.fontScale
-    Box(Modifier.fillMaxWidth()) {
-        val heading: @Composable (Modifier) -> Unit = { modifier ->
-            Text(
-                label,
-                modifier = modifier.testTag("home-hero-heading"),
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.onSurfaceVariant,
-            )
-        }
-        val action: @Composable () -> Unit = {
-            Surface(
-                onClick = onOpen,
-                modifier = Modifier.testTag("home-listen-together").heightIn(min = 48.dp)
-                    .semantics { contentDescription = togetherLabel; role = Role.Button },
-                shape = CircleShape,
-                color = colors.surfaceContainerHigh,
-                contentColor = colors.onSurface,
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+        Surface(
+            onClick = onOpen,
+            modifier = Modifier.testTag("home-listen-together").heightIn(min = 48.dp)
+                .semantics { contentDescription = togetherLabel; role = Role.Button },
+            shape = CircleShape,
+            color = colors.surfaceContainerHigh,
+            contentColor = colors.onSurface,
+        ) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    AutPlayPlatformIcon(AutPlayIcon.Wave, null, Modifier.size(18.dp), colors.primary)
-                    Text(stringResource(R.string.home_listen_together_short), style = MaterialTheme.typography.labelLarge)
-                }
-            }
-        }
-        if (fontScale >= 1.5f) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                heading(Modifier)
-                action()
-            }
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                heading(Modifier.weight(1f))
-                action()
+                AutPlayPlatformIcon(AutPlayIcon.Wave, null, Modifier.size(18.dp), colors.primary)
+                Text(stringResource(R.string.home_listen_together_short), style = MaterialTheme.typography.labelLarge)
             }
         }
     }

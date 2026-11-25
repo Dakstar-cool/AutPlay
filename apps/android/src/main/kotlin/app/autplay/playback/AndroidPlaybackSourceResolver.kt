@@ -1,5 +1,6 @@
 package app.autplay.playback
 
+import app.autplay.application.library.decoded
 import android.content.Context
 import android.net.Uri
 import androidx.core.net.toUri
@@ -26,6 +27,7 @@ data class ResolvedPlaybackSource(
     val runtimeUri: Uri,
     val source: SelectedAudioSource,
     val unavailableLocalReason: PlaybackUnavailableReason? = null,
+    val localSha256: String? = null,
 )
 
 sealed interface AndroidSourceResolution {
@@ -49,14 +51,18 @@ class AndroidPlaybackSourceResolver(
         withContext(ioDispatcher) { resolveOffMain(trackRefId, nowMs) }
 
     private suspend fun resolveOffMain(trackRefId: LocalId, nowMs: Long): AndroidSourceResolution {
+        val track = database.libraryDao().trackRef(trackRefId.value)
         val localStates = database.localAudioDao().statesForPlayback(trackRefId.value, MAX_SOURCES)
         var localFailure: PlaybackUnavailableReason? = null
-        for (state in localStates) {
+        // Synced library rows and the phone import may reference the same recording separately.
+        val sources = localStates + database.localAudioDao().otherAudioForRecording(trackRefId.value, MAX_SOURCES)
+        for (state in sources) {
             val inspection = inspector.inspectForPlayback(state.contentUri) ?: continue
             if (inspection.status == ContentUriStatus.AVAILABLE) {
                 markInspected(state, "AVAILABLE", nowMs)
                 return AndroidSourceResolution.Available(
-                    ResolvedPlaybackSource(trackRefId, state.contentUri.toUri(), SelectedAudioSource.LOCAL_URI),
+                    ResolvedPlaybackSource(trackRefId, state.contentUri.toUri(), SelectedAudioSource.LOCAL_URI,
+                        localSha256 = state.localSha256?.takeIf { state.byteSize != null && state.byteSize == inspection.byteSize }?.toHexString()),
                 )
             }
             val status = when (inspection.status) {
@@ -92,9 +98,16 @@ class AndroidPlaybackSourceResolver(
 
         val active = settings.settings.first()
         val profile = active.activeServerProfileId
+        if (track != null && track.deletedAtMs == null && track.serverProfileId == (profile?.value ?: "legacy-unscoped")) {
+            val tagged = database.trackMetadataDao().get(track.serverProfileId, trackRefId.value)?.decoded()
+            val localUri = findPhoneRecording(applicationContext, tagged?.text("title", track.rawTitle) ?: track.rawTitle,
+                tagged?.text("artist", track.rawArtist) ?: track.rawArtist, track.rawDurationMs)
+            if (localUri != null && inspector.inspectForPlayback(localUri.toString())?.status == ContentUriStatus.AVAILABLE) {
+                return AndroidSourceResolution.Available(ResolvedPlaybackSource(trackRefId, localUri, SelectedAudioSource.LOCAL_URI))
+            }
+        }
         val knownVariantId = (localStates.mapNotNull { it.serverAudioVariantId } +
             intents.mapNotNull { it.serverAudioVariantId }).firstOrNull()
-        val track = if (knownVariantId == null) database.libraryDao().trackRef(trackRefId.value) else null
         val serverTrackRefId = track?.takeIf { it.deletedAtMs == null }?.serverUserTrackRefId
         if (knownVariantId == null && serverTrackRefId != null && profile == null) {
             return AndroidSourceResolution.Unavailable(PlaybackUnavailableReason.VAULT_AUTHORIZATION_UNAVAILABLE)

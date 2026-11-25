@@ -4,7 +4,7 @@
     <string name="settings_gain_off">Off</string>
     <string name="settings_gain_track">Track</string>
     <string name="settings_gain_album">Album</string>
-    <string name="settings_gain_tags_help">Uses ReplayGain tags in the audio file. Album mode falls back to track gain. Untagged tracks keep their original level. Preamp applies to tagged tracks.</string>
+    <string name="settings_gain_tags_help">Tracks use embedded ReplayGain or the server measurement when available. Album mode prefers album gain and falls back to track gain.</string>
     <string name="settings_gain_preamp">Preamp</string>
     <string name="settings_gain_protection">Prevent clipping</string>
     <string name="settings_equalizer">Equalizer</string>

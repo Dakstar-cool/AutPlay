@@ -119,10 +119,6 @@ internal fun HomeWaveWheel(
                 }) {
                     Text(stringResource(R.string.home_wheel_play, stringResource(center.label)))
                 }
-            } else {
-                Text(stringResource(R.string.home_wheel_preview),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodySmall)
             }
         }
     }

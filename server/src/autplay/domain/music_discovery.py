@@ -1,5 +1,6 @@
 """Public catalogue descriptions never authorize source acquisition or identity merges."""
 
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
@@ -60,7 +61,9 @@ class MusicDiscoveryCard:
     recording_title: str | None = None
     release_group_id: UUID | None = None
     release_type: str | None = None
+    performance_types: tuple[str, ...] = ()
     guest_artist_ids: tuple[UUID, ...] = ()
+    artist_members: tuple[dict[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.title.strip() or len(self.title) > 500:
@@ -106,8 +109,13 @@ class MusicDiscoveryCard:
             return None
 
     def view(self) -> dict[str, object]:
-        return {
+        card: dict[str, object] = {
             "id": self.namespaced_id,
+            **(
+                {"performance_types": list(self.performance_types)}
+                if self.performance_types
+                else {}
+            ),
             **(
                 {"guest_artist_ids": [str(item) for item in self.guest_artist_ids]}
                 if self.guest_artist_ids
@@ -135,6 +143,14 @@ class MusicDiscoveryCard:
             in {MusicDiscoveryEntity.ARTIST, MusicDiscoveryEntity.RELEASE},
             "download_search_query": self.download_search_query,
         }
+        if self.artist_members:
+            card["artist_members"] = [
+                {"mbid": member["mbid"], "name": member["name"]} for member in self.artist_members
+            ]
+            # Clients accept complete cards up to 16 KiB, including the original display credit.
+            if len(json.dumps(card, ensure_ascii=False, separators=(",", ":")).encode()) > 16_384:
+                del card["artist_members"]
+        return card
 
 
 @dataclass(frozen=True, slots=True)

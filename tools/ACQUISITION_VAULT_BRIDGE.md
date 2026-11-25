@@ -13,6 +13,13 @@ to its Vault and checkpoint directories. Do not expose download directories thro
 python acquisition_vault_bridge.py --root /music --state /checkpoints --owner OWNER_UUID --provision-device
 ```
 
+Android playlist imports enqueue catalog requests after the recipient syncs the playlist.
+The continuous bridge processes these requests in one background lane when Internet music
+and the shared server catalog are enabled. The bridge uses the configured Internet music
+provider, including its runtime and token provider, and stages pending audio under
+`--state/playlist-audio`. Imported entries and likes belong to the recipient. Up to five
+additional catalog tracks per artist use the existing verified operator publication path.
+
 Repeat `--root` for additional explicitly selected roots. Each completed item must have
 `tracks/<key>/receipt.json` and the receipt's `<provider>/<filename>` beneath that directory.
 Receipts must contain the full SHA-256, exact byte length, positive duration and declared metadata.
@@ -59,3 +66,36 @@ tampering, malformed receipt isolation, fresh-arrival priority during backfill, 
 user sessions, `LOCAL_BRIDGE`-only admissions, exact permit/execution cleanup and device revocation.
 Use the normal disposable PostgreSQL fixture for
 `server/tests/postgresql/test_acquisition_bridge.py`.
+
+
+## Music Preservation Watcher
+
+The bridge runs a preservation scan for its owner at startup and once seven days have
+elapsed since the last completed scan. The acquisition page can request an earlier scan.
+The page displays findings, source failures, original-edition checks and job outcomes.
+PostgreSQL retains the observations for each run. Install migration
+`0079_music_preservation` with the updated API and bridge.
+
+The bundled registry, MusicBrainz withdrawn-release catalogue, Guardian music feed and
+US iTunes edition lookups work without credentials. Additional curated sources live under
+`<bridge --state>/preservation/feeds/*.json`. Each file contains an array of observations
+or an object with a `url` pointing to an HTTPS JSON array. Use a stable `event` across
+sources and revisions. Records carry `kind` (track, album, catalog or lead), `artist`,
+`title`, `version`, `scope`, `date` (ISO date or empty), `reason`, `url`, `confidence`
+(review or confirmed) and `status` (reported, historical, active, restored or retracted).
+A source can include `original_sha256` to check an identified edition in Vault.
+
+The download worker uses the bridge's existing internet-music and catalog settings.
+Supply existing acquisition rights in the bridge-owned
+`<bridge --state>/preservation/originals.json`. A licensing system can maintain this
+file by atomic rename. Its keys are event IDs. Each entry identifies the original with
+the same artist, title and version as the case, SHA-256 of the downloadable file,
+duration in milliseconds and the existing provider's candidate ID. Set `allow_vault`
+for an acquisition and storage grant and supply its `rights_url` and timezone-aware
+`expires_at`. News reports and community feeds cannot issue grants. The worker
+rechecks the grant on use and verifies the file digest and source tags before ingest.
+Queued jobs have priority 1. An album or catalogue can list its original recordings in
+a `tracks` array. Each item supplies its own stable `event`, `artist`, `title`, `version`
+and optional `original_sha256`. The watcher checks and acquires those tracks individually
+using their own grants. A retracted collection or a removed track stops pending acquisitions.
+A collection without an identified track list and unconfirmed reports remain informational.

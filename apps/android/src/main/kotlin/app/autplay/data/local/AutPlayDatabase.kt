@@ -87,6 +87,7 @@ import kotlinx.coroutines.Dispatchers
         ArtistProjectionEntity::class,
         ArtistCreditProjectionEntity::class,
         ArtistCreditNameProjectionEntity::class,
+        CollectionPreferenceEvent::class,
         CatalogArtistCreditLinkEntity::class,
         CatalogArtistCreditLinkOwnerEntity::class,
         ReleaseTrackProjectionEntity::class,
@@ -134,7 +135,7 @@ import kotlinx.coroutines.Dispatchers
         GuestWavePreflightEntity::class,
         GuestWaveQueueProjectionEntity::class,
     ],
-    version = 20,
+    version = 21,
     exportSchema = true,
 )
 abstract class AutPlayDatabase : RoomDatabase() {
@@ -142,6 +143,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
     abstract fun trackMetadataDao(): app.autplay.data.local.dao.TrackMetadataDao
     abstract fun catalogProjectionDao(): CatalogProjectionDao
 
+    abstract fun collectionPreferences(): CollectionPreferenceDao
     abstract fun libraryDao(): LibraryDao
 
     abstract fun playlistDao(): PlaylistDao
@@ -194,6 +196,17 @@ abstract class AutPlayDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_20_21: Migration = object : Migration(20, 21) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE library_entry ADD COLUMN personal_save INTEGER NOT NULL DEFAULT 1")
+                connection.execSQL("ALTER TABLE sync_cursor ADD COLUMN personal_library_version INTEGER NOT NULL DEFAULT 0")
+                connection.execSQL("""CREATE TABLE collection_preference_event (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, owner TEXT NOT NULL, kind TEXT NOT NULL,
+                    target TEXT NOT NULL, liked INTEGER NOT NULL, route TEXT, label TEXT)""")
+                connection.execSQL("CREATE INDEX index_collection_preference_event_owner_kind_target ON collection_preference_event(owner,kind,target)")
+            }
+        }
+
         /** Opens the non-destructive database with bundled SQLite, WAL, and all migrations. */
         fun open(context: Context, name: String = DATABASE_NAME): AutPlayDatabase =
             Room.databaseBuilder<AutPlayDatabase>(
@@ -203,7 +216,7 @@ abstract class AutPlayDatabase : RoomDatabase() {
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .setQueryCoroutineContext(Dispatchers.IO)
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
-                .addMigrations(MIGRATION_18_19, MIGRATION_19_20)
+                .addMigrations(MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21)
                 .build()
 
         /** P08-only additive state required to restore attribution and one logical play session. */

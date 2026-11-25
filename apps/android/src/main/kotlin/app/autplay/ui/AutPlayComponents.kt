@@ -84,8 +84,9 @@ public fun AutPlayArtwork(
     size: Dp = 56.dp,
     painter: Painter? = null,
     trackId: String? = null,
+    catalogCoverId: String? = null,
 ) {
-    val artworkPainter = painter ?: rememberTrackArtwork(trackId)
+    val artworkPainter = painter ?: rememberTrackArtwork(trackId) ?: rememberCatalogCover(catalogCoverId)
     val shape = MaterialTheme.shapes.small
     Box(
         modifier = modifier

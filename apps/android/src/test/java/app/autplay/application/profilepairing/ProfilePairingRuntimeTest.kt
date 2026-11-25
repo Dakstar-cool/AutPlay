@@ -100,6 +100,16 @@ class ProfilePairingRuntimeTest {
         }
     }
 
+    @Test fun connectingToEnteredHttpsOriginSkipsComparisonAndAliasNeedsConfirmation() = runBlocking {
+        val direct = Fixture()
+        assertTrue(direct.runtime.connectToServer(API_ORIGIN.removePrefix("https://")))
+        assertTrue(direct.runtime.state.value.trustConfirmed)
+        val alias = Fixture()
+        assertFalse(alias.runtime.connectToServer("https://alias.example"))
+        assertFalse(alias.runtime.state.value.trustConfirmed)
+        assertTrue(alias.runtime.connectToServer("https://alias.example") { it.apiOrigin == API_ORIGIN })
+    }
+
     @Test fun encryptedPortablePendingBlocksDiscoveryAndCannotReleaseUntilJournalRemoved() = runBlocking {
         val fixture = Fixture()
         val pending = "opaque-pending-even-if-corrupted".toByteArray()

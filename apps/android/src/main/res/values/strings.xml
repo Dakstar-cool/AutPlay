@@ -19,6 +19,7 @@
     <string name="action_back">Back</string>
     <string name="action_open_settings">Open settings</string>
 
+    <string name="onboarding_sign_in_title">Sign in to your account</string>
     <string name="onboarding_welcome_title">Your local account</string>
     <string name="onboarding_welcome_body">Your account keeps your history and playlists together. A password protects access to it.</string>
     <string name="onboarding_continue_local">Create account and continue</string>
@@ -28,16 +29,11 @@
     <string name="onboarding_password_invalid">Use 7–128 characters, including at least one special character such as !, @ or _. A space does not count. Avoid common passwords or a single repeated character.</string>
     <string name="onboarding_password_mismatch">Passwords do not match. Enter the same phrase in both fields.</string>
     <string name="onboarding_saving">Finishing setup on this phone…</string>
-    <string name="home_first_track_body">Choose an audio file from this phone to start listening. Your music works offline.</string>
     <string name="local_audio_picker_hint">In the file chooser, use its menu to open Downloads or another folder.</string>
     <string name="library_play_track">Play %1$s</string>
 
     <string name="home_my_wave">My Wave</string>
-    <string name="home_hero_personal_flow">Your personal flow</string>
     <string name="home_hero_open_player">Open the full player</string>
-    <string name="home_hero_playing">Now playing</string>
-    <string name="home_hero_ready">Ready to play</string>
-    <string name="home_hero_control_locked">Playback controls are unavailable for the active mode</string>
     <string name="home_context_collections">Made for the moment</string>
     <string name="home_context_energy">High energy</string>
     <string name="home_context_running">For running</string>
@@ -45,12 +41,10 @@
     <string name="home_context_evening">Evening</string>
     <string name="home_loading">Loading your local Home feed</string>
     <string name="home_offline_fallback">Offline recommendations are shown only for music available on this device.</string>
-    <string name="home_recently_played">Recently played</string>
     <string name="home_recently_added">Recently added</string>
     <string name="home_playlists">Playlists</string>
     <string name="home_offline_ready">Offline ready</string>
     <string name="home_offline_open">Open offline library</string>
-    <string name="home_problems">Problems requiring attention</string>
     <string name="home_problems_open">Review</string>
     <plurals name="home_problem_total_count">
         <item quantity="one">%d item needs attention</item>
@@ -82,6 +76,8 @@
     <string name="library_add_local_success">Added “%1$s” to the local collection</string>
     <string name="library_empty_body">Choose a music folder or add a local track to get started.</string>
     <string name="library_unknown_artist">Unknown artist</string>
+    <string name="library_on_device">On device</string>
+    <string name="library_on_device_empty">No audio files from this device yet</string>
     <string name="library_favorites_shortcut">Favorites</string>
     <string name="library_favorites_empty">No favorite tracks yet</string>
     <string name="library_sort_label">Sort</string>
@@ -164,7 +160,8 @@
     <string name="player_seek_description">Playback position</string>
     <string name="player_shuffle">Shuffle</string>
     <string name="player_repeat_off">Repeat off</string>
-    <string name="player_repeat_one">Repeat one</string>
+    <string name="player_repeat_once">Repeat this track once</string>
+    <string name="player_repeat_one">Repeat this track continuously</string>
     <string name="player_repeat_all">Repeat all</string>
     <string name="player_progress_description">%1$s of %2$s</string>
     <string name="player_controls_unavailable">Controls are unavailable for this item.</string>
@@ -379,7 +376,7 @@
     <string name="profile_connection_local">Not connected — local mode continues</string>
     <string name="profile_server_origin">Server address</string>
     <string name="profile_server_origin_hint">Use the private address supplied by your server administrator.</string>
-    <string name="profile_check_server">Check server</string>
+    <string name="profile_check_server">Connect to server</string>
     <string name="profile_scan_server_qr">Scan server QR</string>
     <string name="profile_connection_checking">Checking server</string>
     <string name="profile_connection_trust">Confirm server trust</string>
@@ -468,10 +465,6 @@
     <string name="settings_folder_privacy">This folder is used for library updates. Searching the phone requests separate access to audio files. You can revoke permissions in Android settings.</string>
     <string name="settings_metered_downloads">Download tracks using mobile data</string>
     <string name="settings_smooth_track_transitions">Preload the next track</string>
-    <string name="settings_wave_prefetch_off">Do not prepare tracks in advance</string>
-    <string name="settings_wave_prefetch_next">Prepare the next track</string>
-    <string name="settings_wave_prefetch_three">Prepare the next three tracks</string>
-    <string name="settings_wave_prefetch_wifi">Prepare more tracks on Wi-Fi</string>
     <string name="settings_transfer">Transfer settings</string>
     <string name="settings_export">Save settings to a file</string>
     <string name="settings_import">Load settings from a file</string>
@@ -638,9 +631,17 @@
     <string name="variation_live">Live</string>
     <string name="variation_skips_count">%1$d / %2$d</string>
     <string name="detail_collection_listen">Listen</string>
-    <string name="detail_artist_popular">Your most played</string>
+    <string name="detail_artist_popular">Tracks you’ve heard by this artist</string>
+    <string name="artist_track_heard">Previously played</string>
     <string name="detail_finish_edit">Done</string>
     <string name="detail_open_artist">Open artist</string>
     <string name="detail_artist_info">About the artist</string>
     <string name="detail_hide_artist_info">Hide artist details</string>
+    <string name="personal_library_search">Search my music</string>
+    <string name="personal_search_clear">Clear</string>
+    <string name="device_this_phone">%1$s · this phone</string>
+    <string name="device_disconnect">Disconnect device</string>
+    <string name="device_disconnect_explanation">Revoke access for the selected installation?</string>
+    <string name="device_other_installations">Other installations (%1$d)</string>
+    <string name="device_session_count">%1$s (%2$d)</string>
 </resources>

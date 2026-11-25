@@ -15,6 +15,8 @@ import math
 import os
 import signal
 import sys
+import tempfile
+import threading
 import time
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -204,6 +206,7 @@ class Backend:
         from sqlalchemy.orm import sessionmaker
 
         settings = load_api_settings()
+        self.playlist_downloads_enabled = settings.internet_music_enabled
         self.engine = create_engine(
             settings.database_url.get_secret_value(),
             pool_pre_ping=True,
@@ -277,9 +280,11 @@ class Backend:
         # Local operator authority, never a fabricated network token or login session.
         return Principal(self.owner, self.device, UUID(int=0), AccountRole.OWNER)
 
-    def advance(self, receipt: Receipt, checkpoint: dict[str, Any]) -> dict[str, Any]:
+    def advance(self, receipt: Receipt, checkpoint: dict[str, Any], *, preservation: bool = False) -> dict[str, Any]:
         from autplay.adapters.postgresql.library_runtime import LibraryRepository
-        from autplay.adapters.postgresql.models import ImportEntryRow, LibraryEntryRow
+        from autplay.adapters.postgresql.models import ImportEntryRow, LibraryEntryRow, UserTrackRefRow
+        from autplay.application.sync import _acquire_sync_owner_publish_lock
+        from autplay.application.vault_names import project_owner_names
         from sqlalchemy import select
 
         state = dict(checkpoint)
@@ -327,6 +332,11 @@ class Backend:
                 if stored is None or stored.user_track_ref_id is None:
                     raise ReceiptError("import_ref_missing")
                 ref_id = stored.user_track_ref_id
+                _acquire_sync_owner_publish_lock(session, self.owner)
+                ref = session.get(UserTrackRefRow, ref_id, with_for_update=True)
+                if ref is None or ref.user_id != self.owner or ref.recording_id != recording:
+                    raise ReceiptError("import_ref_missing")
+                project_owner_names(session, ref, recording)
                 library_id = LibraryRepository(session).add_library_entry(
                     self.principal,
                     library_entry_id=uuid5(self.owner, receipt.identity),
@@ -408,7 +418,7 @@ class Backend:
                 .values(
                     recording_id=committed.target_recording_id,
                     audio_variant_id=committed.audio_variant_id,
-                    policy_version="acquisition-verified-upload-v1",
+                    policy_version="preservation-verified-upload-v1" if preservation else "acquisition-verified-upload-v1",
                     reason={"upload_session_id": str(upload_id)},
                 )
                 .on_conflict_do_nothing(index_elements=[RecordingCanonicalVariantRow.recording_id])
@@ -430,6 +440,10 @@ class Backend:
             )
             if row is None or row.removed_at or row.user_track_ref_id != UUID(state["ref_id"]):
                 raise ReceiptError("library_entry_removed")
+            ref = session.get(UserTrackRefRow, row.user_track_ref_id, with_for_update=True)
+            if ref is None or ref.user_id != self.owner or ref.recording_id != UUID(state["recording_id"]):
+                raise ReceiptError("import_ref_missing")
+            project_owner_names(session, ref, ref.recording_id)
             if row.availability_status != "VAULT":
                 row.availability_status = "VAULT"
                 row.row_version += 1
@@ -639,6 +653,205 @@ def completed_work(in_flight: dict[str, Future[dict[str, Any]]]) -> dict[str, di
     return ready
 
 
+class PlaylistCatalogPublisher:
+    """Use one background lane and the operator's ordinary verified import path."""
+
+    def __init__(self, backend: Backend, root: Path, stop: threading.Event):
+        from autplay.adapters.internet_music import InternetMusicProvider
+
+        self.backend, self.root, self.stop = backend, root, stop
+        self.provider = InternetMusicProvider()
+
+    def search(self, query):
+        self.backend.authorize()
+        return self.provider.search(query)
+
+    def acquire(self, candidate, context, *, supplemental, original_guard=None):
+        from autplay.adapters.internet_music import InternetMusicProviderError
+        from autplay.application.playlist_vault import catalog_match, in_vault
+        from autplay.adapters.postgresql.shared_catalog import publish_bridge_catalog, PUBLISHED_AUDIO
+        from autplay.domain.import_identity import normalize_text
+        from autplay.domain.jobs import RetryableJobError, TerminalJobError
+        from autplay.domain.resource_admission import ResourceAdmissionError
+        from autplay.domain.vault import VaultError
+        from sqlalchemy import text
+        from sqlalchemy.exc import OperationalError
+
+        artist, title = candidate["artist"], candidate["title"]
+        identity = json.dumps([normalize_text(artist), normalize_text(title)], ensure_ascii=False)
+        lock_key = int.from_bytes(hashlib.sha256(identity.encode()).digest()[:8], signed=True)
+        # A session lock also serializes publishers using different staging directories.
+        with self.backend.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as lock:
+            if not lock.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": lock_key}):
+                raise RetryableJobError("playlist_vault_busy")
+            try:
+                if original_guard:
+                    original_guard()
+                else:
+                    with self.backend.sessions() as session:
+                        found = catalog_match(session, artist, title, candidate["duration_ms"])
+                        if found or supplemental and in_vault(session, artist, title):
+                            return found
+                self.backend.authorize()
+                cache_identity = candidate["candidate_id"]
+                if original_guard:
+                    cache_identity += ":" + candidate["sha256"] + ":" + candidate["version"]
+                key = hashlib.sha256(cache_identity.encode()).hexdigest()
+                self.root.mkdir(parents=True, exist_ok=True)
+                work = self.root / key
+                if not work.exists():
+                    # Commit complete source + receipt together. A crash can only leave scratch data.
+                    with tempfile.TemporaryDirectory(dir=self.root) as scratch:
+                        staged = Path(scratch) / key
+                        try:
+                            self._download(staged, candidate, original=bool(original_guard))
+                        except InternetMusicProviderError as error:
+                            if error.retryable:
+                                raise RetryableJobError(error.code) from error
+                            if supplemental:
+                                return None
+                            raise TerminalJobError(error.code) from error
+                        os.replace(staged, work)
+                checkpoint = work / "publication.json"
+                state = json.loads(checkpoint.read_text()) if checkpoint.exists() else {}
+                receipt = None
+                progress_at = time.monotonic()
+                while state.get("state") != "PUBLISHED":
+                    context.raise_if_cancelled()
+                    if self.stop.is_set():
+                        raise RetryableJobError("playlist_publisher_stopping")
+                    if receipt is None:
+                        receipt = read_receipt(work / "receipt.json", self.root)
+                        if receipt.policy_reasons:
+                            if supplemental:
+                                return None
+                            raise TerminalJobError(receipt.policy_reasons[0])
+                    if original_guard:
+                        original_guard()
+                        if receipt.sha256 != candidate["sha256"]:
+                            raise TerminalJobError("preservation.original_mismatch")
+                        if state.get("recording_id") and not state.get("upload_id"):
+                            with self.backend.sessions() as session:
+                                conflict = session.scalar(text("""SELECT EXISTS(SELECT FROM vault.audio_variant v
+                                    JOIN vault.vault_object o USING(vault_object_id)
+                                    WHERE v.recording_id=:recording AND v.deleted_at IS NULL
+                                    AND o.sha256<>decode(:sha,'hex') AND o.commit_status='COMMITTED')"""),
+                                    {"recording": UUID(state["recording_id"]), "sha": candidate["sha256"]})
+                            if conflict:
+                                raise TerminalJobError("preservation.edition_conflict")
+                    updated = (self.backend.advance(receipt, state, preservation=True) if original_guard
+                               else self.backend.advance(receipt, state))
+                    if updated != state:
+                        save(checkpoint, updated)
+                        state = updated
+                        progress_at = time.monotonic()
+                    elif time.monotonic() - progress_at > 120:
+                        raise RetryableJobError("playlist_publication_pending")
+                    else:
+                        self.stop.wait(2)
+                recording = UUID(state["recording_id"])
+                if original_guard:
+                    original_guard()
+                    with self.backend.sessions() as session:
+                        published = session.scalar(text("""SELECT v.recording_id FROM vault.audio_variant v
+                            JOIN vault.vault_object o USING(vault_object_id) WHERE v.audio_variant_id=:variant
+                            AND v.recording_id=:recording AND v.validation_status='VALID' AND v.deleted_at IS NULL
+                            AND o.commit_status='COMMITTED' AND o.sha256=decode(:digest,'hex')"""),
+                            {"variant": UUID(state["variant_id"]), "recording": recording, "digest": candidate["sha256"]})
+                        if not published:
+                            raise RetryableJobError("preservation.vault_pending")
+                else:
+                    with self.backend.sessions.begin() as session:
+                        publish_bridge_catalog(session, recording)
+                        published = session.scalar(text(f"SELECT recording_id FROM ({PUBLISHED_AUDIO}) p "
+                            "WHERE recording_id=:recording AND audio_variant_id=:variant"),
+                            {"recording": recording, "variant": UUID(state["variant_id"])})
+                        if not published:
+                            raise RetryableJobError("playlist_catalog_unavailable")
+                if receipt and receipt.source_metadata:
+                    self.backend.schedule_metadata(receipt, state)
+                # A verified Vault replica now owns the bytes. Keep the small replay receipt.
+                (work / "yt_dlp" / "audio.media").unlink(missing_ok=True)
+                return published
+            except ReceiptError as error:
+                raise TerminalJobError("playlist_receipt_invalid") from error
+            except (OSError, OperationalError, ResourceAdmissionError, VaultError) as error:
+                raise RetryableJobError("playlist_publication_unavailable") from error
+            finally:
+                lock.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": lock_key})
+
+    def _download(self, work, candidate, *, original=False):
+        from autplay.adapters.filesystem.provider_child import read_source_metadata
+        from autplay.adapters.media.tools import FfprobeInspector
+
+        directory = work / "yt_dlp"
+        path = self.provider.download(candidate["candidate_id"], directory)
+        with path.open("rb") as audio:
+            digest = hashlib.file_digest(audio, "sha256").hexdigest()
+        detail = FfprobeInspector("ffprobe").inspect(path, single_audio=True)
+        evidence = read_source_metadata(directory, candidate["candidate_id"])
+        title = candidate["title"]
+        if original:
+            from autplay.domain.import_identity import normalize_text
+            from autplay.domain.jobs import TerminalJobError
+
+            fields = (evidence or {}).get("fields") or {}
+            if (digest != candidate["sha256"] or abs(detail.duration_ms - candidate["duration_ms"]) > 2000
+                    or any(normalize_text(fields.get(name) or "") != normalize_text(candidate[name])
+                           for name in ("title", "artist"))):
+                raise TerminalJobError("preservation.original_mismatch")
+            title = f"{title} [{candidate['version']}]"
+        save(work / "receipt.json", {
+            "schema_version": 1, "key": work.name, "provider": "yt_dlp", "filename": path.name,
+            "bytes": path.stat().st_size, "sha256": digest, "duration_seconds": detail.duration_ms / 1000,
+            "item": {"artist": candidate["artist"], "title": title,
+                     "album": ((evidence or {}).get("fields") or {}).get("album")},
+            "source_metadata": evidence,
+        })
+
+
+def playlist_worker(backend, root, stop, watcher):
+    from autplay.application.music_preservation import PRESERVE
+    from autplay.adapters.postgresql.jobs_uow import SqlAlchemyJobUnitOfWorkFactory
+    from autplay.adapters.system import Uuid7Generator
+    from autplay.application.playlist_vault import PLAYLIST_ARTIST, PLAYLIST_PLAN, PLAYLIST_TRACK, PlaylistVaultHandler
+    from autplay.entrypoints.worker_cpu import build_cpu_worker
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    publisher = PlaylistCatalogPublisher(backend, root, stop)
+    handler = PlaylistVaultHandler(backend.sessions, publisher.search, publisher.acquire)
+    handlers = {key: handler for key in (PLAYLIST_TRACK, PLAYLIST_ARTIST, PLAYLIST_PLAN)}
+    worker = build_cpu_worker(uow_factory=SqlAlchemyJobUnitOfWorkFactory(backend.sessions),
+                              ids=Uuid7Generator(), handlers=handlers)
+    originals_worker = build_cpu_worker(
+        uow_factory=SqlAlchemyJobUnitOfWorkFactory(backend.sessions, claim_owner=backend.owner),
+        ids=Uuid7Generator(), handlers={PRESERVE: lambda ctx, lease: watcher.acquire(ctx, lease, publisher)},
+    )
+    while not stop.is_set():
+        enabled = False
+        try:
+            with backend.sessions() as session:
+                enabled = session.scalar(text("""SELECT EXISTS(SELECT FROM identity.source_provider
+                    WHERE provider_key='autplay.server-catalog' AND enabled AND deleted_at IS NULL AND 'STREAM'=ANY(capabilities))"""))
+            if originals_worker.run_once().outcome.value == "IDLE" and enabled:
+                worker.run_once()
+        except OperationalError:
+            enabled = False
+            print("playlist catalog database unavailable", file=sys.stderr, flush=True)
+        stop.wait(2 if enabled else 30)
+
+
+def preservation_scans(watcher, stop):
+    from sqlalchemy.exc import SQLAlchemyError
+    while not stop.is_set():
+        try:
+            watcher.tick()
+        except SQLAlchemyError:
+            print("preservation database unavailable", file=sys.stderr, flush=True)
+        stop.wait(60)
+
+
 def main() -> int:
     if sys.platform == "win32":
         raise ReceiptError("bridge_platform_unsupported")
@@ -660,11 +873,21 @@ def main() -> int:
     # Each command owns its SQLAlchemy session; at most eight independent identities
     # use I/O concurrently. PostgreSQL still owns leases, replay and publish ordering.
     executor = ThreadPoolExecutor(max_workers=8)
+    playlist_stop = threading.Event()
+    from autplay.application.music_preservation import PreservationWatcher
+
+    watcher = PreservationWatcher(backend.sessions, backend.owner, args.state / "preservation")
+    playlist_executor = ThreadPoolExecutor(max_workers=2)
+    monitor = None if args.once else playlist_executor.submit(preservation_scans, watcher, playlist_stop)
+    playlist_task = None
+    if backend.playlist_downloads_enabled and not args.once:
+        playlist_task = playlist_executor.submit(playlist_worker, backend, args.state / "playlist-audio", playlist_stop, watcher)
     stopping = False
 
     def stop(_signal: int, _frame: Any) -> None:
         nonlocal stopping
         stopping = True
+        playlist_stop.set()
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -680,6 +903,10 @@ def main() -> int:
     next_scan = next_summary = scan_seconds = 0.0
     invalid = 0
     while not stopping or in_flight:
+        if monitor is not None and monitor.done():
+            monitor.result()
+        if playlist_task is not None and playlist_task.done():
+            playlist_task.result()
         now = time.monotonic()
         for key, updated in completed_work(in_flight).items():
             # Persist each result immediately. A slow sibling cannot delay playback
@@ -761,6 +988,8 @@ def main() -> int:
         elif not stopping:
             time.sleep(0.25)
     executor.shutdown(wait=True)
+    playlist_stop.set()
+    playlist_executor.shutdown(wait=True)
     backend.close()
     return 0
 

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import signal
 import subprocess
 import threading
-import wave
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -28,18 +26,11 @@ from local_music_acquisition.xray import XrayConfig, XrayManager
 
 
 @pytest.mark.parametrize("durable", [False, True])
-def test_parallel_pipeline_providers_share_xray_through_fallback(runtime, tmp_path, durable):
+def test_parallel_pipeline_providers_share_xray_through_fallback(runtime, tmp_path, durable, audio):
     manager, children, timers, _ = runtime
     first = SoundCloudProvider(requires_proxy=True, xray=manager)
     second = BandcampProvider(requires_proxy=True, xray=manager)
     overlap = threading.Barrier(2)
-    payload = io.BytesIO()
-    with wave.open(payload, "wb") as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(8000)
-        handle.writeframes(b"\0\0" * 96000)
-    audio = payload.getvalue()
     first_call = True
 
     def acquire(provider, item, output, proxy_url):
@@ -175,6 +166,7 @@ def test_cli_closes_owned_xray_and_restores_signal_handlers(
     monkeypatch,
     tmp_path,
     interrupted,
+    audio,
 ):
     manager, children, _, _ = runtime
     monkeypatch.setattr(cli, "XrayManager", lambda settings: manager)
@@ -184,7 +176,8 @@ def test_cli_closes_owned_xray_and_restores_signal_handlers(
         assert children[0].poll() is None
         if interrupted:
             signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
-        return AcquiredArtifact(self.name, "sha256:0123456789ab")
+        (output / f"{item.title}.wav").write_bytes(audio)
+        return AcquiredArtifact(self.name, "sha256:" + hashlib.sha256(audio).hexdigest()[:12])
 
     monkeypatch.setattr(SoundCloudProvider, "_acquire", acquire)
     playlist = tmp_path / "playlist.txt"

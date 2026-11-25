@@ -20,6 +20,8 @@ interface InternetMetadataDiscoveryPort {
 data class CatalogueTrackReference(val id: String, val rowVersion: Long, val recordingId: String?,
     val title: String, val artist: String?, val album: String?, val durationMs: Long?, val resolutionStatus: String)
 
+internal data class CatalogDevicePage(val files: List<Pair<CatalogueTrackReference, String>>, val unavailable: Int, val nextOffset: Int?)
+
 internal suspend fun CatalogueTrackReference.localTarget(database: AutPlayDatabase, profile: String): String =
     database.withWriteTransaction {
         val dao = database.libraryDao()

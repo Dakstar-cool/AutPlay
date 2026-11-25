@@ -28,6 +28,9 @@ EXPECTED_SCHEMAS: frozenset[str] = frozenset(
     ]
 )
 EXPECTED_TABLE_KEYS: tuple[str, ...] = (
+    "discovery.preservation_case",
+    "discovery.preservation_run",
+    "discovery.preservation_check",
     "ml.sona_native_capture",
     "account.device_capability_revision",
     "account.portable_identity",
@@ -217,6 +220,9 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "social.guest_rate_window",
 )
 EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
+    "discovery.preservation_case": 4,
+    "discovery.preservation_run": 5,
+    "discovery.preservation_check": 7,
     "ml.sona_native_capture": 9,
     "account.device_capability_revision": 10,
     "account.portable_identity": 7,
@@ -415,6 +421,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "portable_challenge_binding_commit",
         "portable_record_account_cursor",
         "portable_record_listening_aliases",
+        "preservation_pending",
         "portable_taste_signal_account_cursor",
         "ix_training_participant_owner",
         "uq_training_execution_run_open",
@@ -578,7 +585,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_social_guest_rate_expiry",
     }
 )
-EXPECTED_COLUMN_COUNT = 2115
+EXPECTED_COLUMN_COUNT = 2131
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",

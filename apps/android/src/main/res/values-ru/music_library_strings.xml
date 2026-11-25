@@ -39,14 +39,16 @@
     <string name="catalog_latest_release">Новый релиз</string>
     <string name="catalog_guest_tracks">С участием</string>
     <string name="catalogue_add_to_playlist">Добавить в плейлист</string>
-    <string name="catalog_popular_tracks">Популярные треки · ListenBrainz</string>
+    <string name="catalog_popular_tracks">Популярные треки</string>
     <string name="catalogue_vault_count">В Vault %1$d из %2$d</string>
     <string name="catalogue_in_vault">В Vault</string>
-    <string name="catalog_download_artist">Загрузить артиста</string>
+    <string name="catalog_download_artist">Загрузить дискографию в Vault</string>
     <string name="catalog_download_release">Загрузить альбом</string>
     <string name="catalog_download_track">Загрузить трек</string>
-    <string name="catalog_download_scope">Включены основные издания и гостевые треки.</string>
-    <string name="catalog_download_alternatives">Включить альтернативные издания</string>
+    <string name="catalog_download_library_scope">Выберите исполнителя в каталоге для загрузки дискографии.</string>
+    <string name="catalog_download_device_result">В загрузках: %1$d · Недоступны на сервере: %2$d</string>
+    <string name="catalog_download_scope">Включены доступные записи исполнителя и совместные треки. Помеченные каверы и концертные версии исключены.</string>
+    <string name="catalog_download_vault_complete">Загрузка в Vault завершена</string>
     <string name="catalog_download_counts">В Vault %1$d · В очереди %2$d · Доступны для загрузки %3$d · Недоступны %4$d</string>
     <string name="catalog_download_start">Начать загрузку</string>
     <string name="catalog_download_preview">Рассчитать загрузку</string>
@@ -54,4 +56,8 @@
     <string name="catalog_match_missing">Недостаточно данных для сопоставления</string>
     <string name="catalog_track_failed">Ошибка загрузки</string>
     <string name="catalogue_on_phone">На телефоне</string>
+    <string name="download_wait_network">Ожидание подключения к сети</string>
+    <string name="download_wait_unmetered">Ожидание Wi-Fi или другой сети без тарификации</string>
+    <string name="download_allow_metered">Разрешить загрузки через мобильную сеть</string>
+    <string name="player_find_phone_audio">Найти этот трек на телефоне</string>
 </resources>

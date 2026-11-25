@@ -1,5 +1,6 @@
 package app.autplay.application.recommendation
 
+import app.autplay.data.local.preferCollections
 import androidx.room3.withWriteTransaction
 import app.autplay.application.playback.NewPlaybackQueueEntry
 import app.autplay.application.playback.OrdinaryQueueReplacementGuard
@@ -113,7 +114,7 @@ internal class PersonalWaveQueue(private val database: AutPlayDatabase) {
                         owner, vaultAvailable = false, limit = 200,
                         onlyUnresolved = remote != null, randomOrder = remote != null,
                     )
-                    library.selectSongRefs(owner, sampled, now, wave = true,
+                    library.selectSongRefs(owner, database.preferCollections(binding?.userId?.value ?: database.portableAccountDao().scope(owner)?.accountId ?: owner, owner, sampled), now, wave = true,
                         confirmedVariationRecordings = ranked?.confirmedVariations.orEmpty(), lessFrequentRecordings = ranked?.lessFrequent.orEmpty()).map {
                         NewPlaybackQueueEntry(LocalId.random(), LocalId(it), "WAVE", "LOCAL_THEN_VAULT")
                     }
@@ -190,7 +191,8 @@ internal class PersonalWaveQueue(private val database: AutPlayDatabase) {
             byRecording[item.recording.value].orEmpty().sortedByDescending { it.isLocallyAvailable }
                 .map { it.localUserTrackRefId to item }
         }.toMap()
-        val eligible = database.libraryDao().selectSongRefs(binding.serverProfileId.value, ranked.keys.toList(), now, wave = true,
+        val preferred = database.preferCollections(binding.userId.value, binding.serverProfileId.value, ranked.keys.toList())
+        val eligible = database.libraryDao().selectSongRefs(binding.serverProfileId.value, preferred, now, wave = true,
             confirmedVariationRecordings = order.confirmedVariations, lessFrequentRecordings = order.lessFrequent)
         return buildList {
             for (ref in eligible) {

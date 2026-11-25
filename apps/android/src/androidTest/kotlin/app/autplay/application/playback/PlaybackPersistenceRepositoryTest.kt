@@ -416,6 +416,30 @@ class PlaybackPersistenceRepositoryTest {
         Unit
     }
 
+    @Test fun waveTailAppendsFreshTracksAndKeepsCurrentEntryAfterRestore() = runBlocking {
+        val repo = PlaybackPersistenceRepository(database)
+        val wave = app.autplay.application.recommendation.PersonalWaveSession.start("GENERAL")
+        val library = database.libraryDao()
+        for (i in 1..3) {
+            // Third handle resolves to the same recording as the first.
+            library.upsertTrackRef(track(id(i), uuid(if (i == 3) 1 else i)).copy(serverUserTrackRefId = uuid(i + 10)))
+            library.upsertEntry(app.autplay.data.local.entity.LibraryEntryEntity(uuid(20 + i), null, uuid(i),
+                1, "LOCAL", "LOCAL", "CLEAN", null, 0, null, 1))
+            database.localAudioDao().upsertState(app.autplay.data.local.entity.LocalAudioStateEntity(
+                uuid(30 + i), uuid(i), null, null, "content://media/audio/$i", true, null,
+                null, null, null, null, null, null, null, null, 1000, "AVAILABLE", "USER_IMPORT",
+                null, null, null, 1, 1))
+        }
+        repo.activateQueue(wave.id, listOf(NewPlaybackQueueEntry(id(100), id(1), "WAVE", "LOCAL_THEN_VAULT")),
+            "USER", wave.queueContext(null), null, "GENERAL", 1)
+        val added = repo.extendWave(wave.id.value, uuid(100), 1, null, false)
+        assertEquals(listOf(uuid(2)), added.map { it.localUserTrackRefId })
+        assertEquals(emptyList<Any>(), repo.extendWave(wave.id.value, uuid(100), 1, null, false))
+        val restored = requireNotNull(repo.restoreActive())
+        assertEquals(uuid(100), restored.snapshot.currentEntryId)
+        assertEquals(listOf(uuid(1), uuid(2)), restored.entries.map { it.localUserTrackRefId })
+    }
+
     private fun track(
         id: LocalId,
         recordingId: String,

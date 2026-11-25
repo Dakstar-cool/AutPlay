@@ -7,6 +7,8 @@ import androidx.room3.withWriteTransaction
 import app.autplay.data.local.entity.UserTrackRefEntity
 import app.autplay.application.sync.remoteLocalId
 import app.autplay.application.library.decoded
+import app.autplay.application.library.names
+import app.autplay.application.artist.TrackNames
 
 data class VaultSearchResult(
     val remoteLibraryEntryId: String,
@@ -37,11 +39,13 @@ class VaultSearchProjector(private val database: AutPlayDatabase) {
         bounded.map { row ->
             val local = localByServerId[row.userTrackRefId]
             val effective = local?.let { metadata[it.localUserTrackRefId]?.decoded() }
+            val names = if (local == null) TrackNames(row.title, row.artist)
+                else effective.names(local.rawTitle ?: row.title, local.rawArtist ?: row.artist)
             VaultSearchResult(
                 remoteLibraryEntryId = row.libraryEntryId,
                 remoteUserTrackRefId = row.userTrackRefId,
-                title = if (effective == null) local?.rawTitle ?: row.title else effective.text("title", local.rawTitle),
-                artist = if (effective == null) local?.rawArtist ?: row.artist else effective.text("artist", local.rawArtist),
+                title = names.title,
+                artist = names.artist,
                 catalogId = row.catalogId,
                 recordingId = row.recordingId,
                 durationMs = local?.rawDurationMs ?: row.durationMs,

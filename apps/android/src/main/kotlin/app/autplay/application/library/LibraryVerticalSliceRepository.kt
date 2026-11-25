@@ -90,22 +90,33 @@ class LibraryVerticalSliceRepository(
         mutate(binding, changeId, "LIBRARY_ENTRY_UPSERTED", "LIBRARY_ENTRY", entryId, now, "{\"library_entry_local_id\":${q(entryId.value)},\"removed_at_ms\":null}") { sequence, bound ->
             val existing = database.libraryDao().entry(entryId.value) ?: missing()
             ensureOwned(binding, existing.serverProfileId)
-            database.libraryDao().upsertEntry(existing.copy(removedAtMs = null, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
+            database.libraryDao().upsertEntry(existing.copy(removedAtMs = null, personalSave = true, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
         }
 
     suspend fun setPreference(binding: ClientEventBinding?, trackRefId: LocalId, changeId: LocalId, preference: String, excluded: Boolean, attributionJson: String?, now: Long): SliceMutationResult =
         changePreference(binding, trackRefId, changeId, preference, excluded, attributionJson, now)
 
-    private suspend fun changePreference(binding: ClientEventBinding?, trackRefId: LocalId, changeId: LocalId, preference: String, excluded: Boolean?, attributionJson: String?, now: Long): SliceMutationResult {
+    private suspend fun changePreference(binding: ClientEventBinding?, trackRefId: LocalId, changeId: LocalId, preference: String, excluded: Boolean?, attributionJson: String?, now: Long): SliceMutationResult =
+        database.withWriteTransaction { writePreference(binding, trackRefId, changeId, preference, excluded, attributionJson, now) }
+            .also { scheduleSync(binding, it) }
+
+    private suspend fun writePreference(binding: ClientEventBinding?, trackRefId: LocalId, changeId: LocalId, preference: String, excluded: Boolean?, attributionJson: String?, now: Long): SliceMutationResult {
         require(preference in setOf("NEUTRAL", "LIKED", "DISLIKED"))
         val attribution = attributionJson?.let(::validateAttribution)
         var resolvedExcluded = false
         // Read the preserved flag in the same write transaction as the row and Journal event.
         val payload: suspend () -> String = {
+            val canonical = database.libraryDao().trackRef(trackRefId.value)?.serverUserTrackRefId
             resolvedExcluded = excluded ?: (database.libraryDao().preference(trackRefId.value)?.excludedFromTaste ?: false)
-            "{\"attribution\":${attribution ?: "null"},\"excluded_from_taste\":$resolvedExcluded,\"local_user_track_ref_id\":${q(trackRefId.value)},\"preference\":${q(preference)}}"
+            kotlinx.serialization.json.buildJsonObject {
+                put("attribution", attribution?.let { Json.parseToJsonElement(it) } ?: kotlinx.serialization.json.JsonNull)
+                put("excluded_from_taste", JsonPrimitive(resolvedExcluded))
+                put("local_user_track_ref_id", JsonPrimitive(trackRefId.value))
+                put("preference", JsonPrimitive(preference))
+                canonical?.let { put("server_user_track_ref_id", JsonPrimitive(it)) }
+            }.toString()
         }
-        return mutate(binding, changeId, "USER_TRACK_PREFERENCE_SET", "USER_TRACK_PREFERENCE", trackRefId, now, payload) { sequence, bound ->
+        return writeMutation(binding, changeId, "USER_TRACK_PREFERENCE_SET", "USER_TRACK_PREFERENCE", trackRefId, now, payload) { sequence, bound ->
             val track = database.libraryDao().trackRef(trackRefId.value) ?: missing()
             ensureOwned(binding, track.serverProfileId)
             database.libraryDao().upsertPreference(
@@ -168,6 +179,10 @@ class LibraryVerticalSliceRepository(
 
     suspend fun saveSharedPlaylist(
         binding: ClientEventBinding?, playlistId: LocalId, snapshot: SharedPlaylist, now: Long,
+    ): LocalId = saveImportedPlaylist(binding, playlistId, PlaylistImportFile(snapshot), now)
+
+    suspend fun saveImportedPlaylist(
+        binding: ClientEventBinding?, playlistId: LocalId, snapshot: PlaylistImportFile, now: Long,
     ): LocalId {
         fun child(key: String) = LocalId(UUID.nameUUIDFromBytes(
             "shared-playlist:${playlistId.value}:$key".toByteArray()).toString())
@@ -184,16 +199,25 @@ class LibraryVerticalSliceRepository(
                 return@withWriteTransaction SliceMutationResult(change(0), binding != null, existing.lastLocalSequence)
             }
             val created = writePlaylist(binding, playlistId, change(0), snapshot.name, snapshot.description, now)
+            val knownByLabel = if (snapshot.shareToken == null) {
+                snapshot.tracks.mapNotNull { it.title }.distinct().chunked(400)
+                    .flatMap { database.libraryDao().tracksByImportTitles(profile, it) }
+                    .distinctBy { it.localUserTrackRefId }
+                    .groupBy { it.rawArtist?.lowercase() to it.rawTitle?.lowercase() }
+            } else emptyMap()
             val refs = snapshot.tracks.mapIndexed { index, track ->
                 val known = track.recordingId?.let { database.libraryDao().trackRefByRecording(profile, it) }
+                    ?: knownByLabel[track.artist?.lowercase() to track.title?.lowercase()]?.singleOrNull()
                 if (known != null) return@mapIndexed known
                 val id = child("track-$index")
                 val payload = kotlinx.serialization.json.buildJsonObject {
                     put("title", JsonPrimitive(track.title))
                     put("artist", JsonPrimitive(track.artist))
                     put("duration_ms", JsonPrimitive(track.durationMs?.takeIf { it > 0 }))
-                    put("shared_playlist_id", JsonPrimitive(snapshot.token))
-                    put("shared_track_index", JsonPrimitive(index))
+                    if (snapshot.shareToken != null) {
+                        put("shared_playlist_id", JsonPrimitive(snapshot.shareToken))
+                        put("shared_track_index", JsonPrimitive(index))
+                    }
                 }.toString()
                 writeMutation(binding, change(1 + index), "USER_TRACK_REF_CREATED", "USER_TRACK_REF",
                     id, now, { payload }) { sequence, bound ->
@@ -211,6 +235,10 @@ class LibraryVerticalSliceRepository(
                 val payload = kotlinx.serialization.json.buildJsonObject {
                     put("local_playlist_entry_id", JsonPrimitive(entryId.value))
                     put("local_playlist_id", JsonPrimitive(playlistId.value))
+                    if (binding != null) {
+                        put("playlist_import", JsonPrimitive(true))
+                        if (index == snapshot.entries.lastIndex) put("playlist_import_complete", JsonPrimitive(true))
+                    }
                     if (ref.serverUserTrackRefId == null) put("local_user_track_ref_id", JsonPrimitive(ref.localUserTrackRefId))
                     else put("user_track_ref_id", JsonPrimitive(ref.serverUserTrackRefId))
                 }.toString()
@@ -220,6 +248,10 @@ class LibraryVerticalSliceRepository(
                     database.playlistDao().insertEntry(PlaylistEntryEntity(entryId.value, null, playlistId.value,
                         ref.localUserTrackRefId, position, position, null, now, sync(bound), null, sequence, null, profile))
                 }
+            }
+            if (binding != null) refs.distinctBy { it.localUserTrackRefId }.forEachIndexed { index, ref ->
+                val changeId = change(1 + snapshot.tracks.size + snapshot.entries.size + index)
+                writePreference(binding, LocalId(ref.localUserTrackRefId), changeId, "LIKED", false, null, now)
             }
             created
         }

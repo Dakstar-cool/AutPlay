@@ -63,6 +63,7 @@ class _NativeBandcampIE(BandcampIE):  # type: ignore[misc]
                 self._native_membership = {
                     "native_album_id": current.get("album_id"),
                     "native_artist_id": current.get("band_id"),
+                    "native_art_id": current.get("art_id") or result.get("art_id"),
                     "track_id": current.get("id"),
                 }
         return result

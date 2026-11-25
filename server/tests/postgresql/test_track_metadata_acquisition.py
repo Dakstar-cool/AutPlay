@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -29,7 +30,7 @@ from autplay.adapters.postgresql.vault_uow import (
     SqlAlchemyVaultUnitOfWorkFactory,
     TransactionalIngestRepository,
 )
-from autplay.adapters.public_track_metadata import MusicBrainzMetadataProvider
+from autplay.adapters.public_track_metadata import MusicBrainzMetadataProvider, PublicMetadataHttp
 from autplay.application.internet_acquisition import InternetAcquisitionTarget
 from autplay.application.internet_music import INTERNET_ACQUIRE_JOB, InternetMusicService
 from autplay.application.job_worker import JobExecutionContext, JobLeaseLost
@@ -68,7 +69,7 @@ from autplay.domain.vault import (
     Sha256Digest,
     VerifiedStagedFile,
 )
-from autplay.ports.track_metadata import EmbeddedMetadata, MetadataProviderError
+from autplay.ports.track_metadata import EmbeddedMetadata, MetadataProviderError, TrackLoudness
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -161,12 +162,16 @@ class Work:
     def fingerprint(self) -> ChromaprintEvidence:
         raise AssertionError("fingerprint should not run")
 
-    def normalize_artwork(self, payload: bytes) -> bytes:
+    def normalize_artwork(self, payload: bytes, *, catalog_cover: bool = False) -> bytes:
         return payload
 
 
 class Provider(MusicBrainzMetadataProvider):
     def __init__(self, candidate: MetadataCandidate | None = None) -> None:
+        http = Mock(spec_set=PublicMetadataHttp)
+        http.json.return_value = {}
+        http.get.return_value = None
+        super().__init__(http)
         self.candidate = candidate
         self.query: MetadataQuery | None = None
         self.cover_error: MetadataProviderError | None = None
@@ -586,7 +591,12 @@ def test_worker_uses_measured_audio_duration_and_preserves_embedded_priority(
 
     class EmbeddedWork(Work):
         def read_audio(self) -> EmbeddedMetadata:
-            return EmbeddedMetadata({"album": "Embedded", "release_date": "1990"}, None, 180000)
+            return EmbeddedMetadata(
+                {"album": "Embedded", "release_date": "1990"},
+                None,
+                180000,
+                TrackLoudness(4.25, 0.12),
+            )
 
     provider = Provider()
     audio = MetadataAudioTarget(
@@ -604,6 +614,16 @@ def test_worker_uses_measured_audio_duration_and_preserves_embedded_priority(
     view = service.get(principal, ref_id)
     assert view["fields"]["album"] == "Embedded" and view["album_group_v1"] is None
     assert view["provenance"]["album"]["source"] == "EMBEDDED"
+    assert view["loudness_v1"] == {
+        "gain_db": 4.25,
+        "true_peak": 0.12,
+        "audio_variant_id": str(variant),
+        "sha256": (b"x" * 32).hex(),
+    }
+    generation = lease.payload["generation"]
+    assert type(generation) is int
+    service.apply_worker(ref_id, generation, context, audio_variant_id=uuid4())
+    assert "loudness_v1" not in service.get(principal, ref_id)
     engine.dispose()
 
 
@@ -615,7 +635,7 @@ def test_optional_art_protocol_failure_retains_confirmed_edition(database_url: s
     lease, context = claim(sessions)
 
     class BrokenWork(Work):
-        def normalize_artwork(self, payload: bytes) -> bytes:
+        def normalize_artwork(self, payload: bytes, *, catalog_cover: bool = False) -> bytes:
             raise ChildProtocolError()
 
     chosen = candidate()
@@ -792,6 +812,16 @@ def test_exited_app_handoff_stages_until_real_ingest_then_sweep_groups(
         media=Media(),
         fingerprints=Fingerprints(),
     )(ingest_context, ingest_lease)
+    with admission.sessions() as session:
+        row = session.get(TrackMetadataRow, target.ref_id)
+        assert row is not None and row.document.get("published_acquisition_id") == str(
+            target.acquisition_id
+        )
+        if old_cover is None:
+            native_names = evidence["fields"]
+            assert isinstance(native_names, dict)
+            assert row.document["fields"]["title"] == native_names["title"]
+            assert row.document["fields"]["artist"] == native_names["artist"]
     assert service.enqueue_missing(target.user_id) == 1
     lease, context = claim(admission.sessions)
     run(service, lease, context, Provider())

@@ -1,5 +1,6 @@
 package app.autplay.application.download
 
+import androidx.room3.withWriteTransaction
 import android.content.Context
 import android.database.sqlite.SQLiteFullException
 import android.net.Uri
@@ -13,6 +14,8 @@ import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
+import app.autplay.application.library.names
+import app.autplay.application.library.decoded
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.AutPlayRuntime
 import app.autplay.application.sync.ClientEventBinding
@@ -32,12 +35,13 @@ import app.autplay.download.DownloadStoragePolicy
 import app.autplay.download.MediaDownloadComponents
 import app.autplay.download.Media3DownloadSnapshot
 import app.autplay.download.Media3DownloadState
-import app.autplay.download.Media3Command
 import app.autplay.download.StorageAdmission
 import app.autplay.download.StoragePolicy
 import app.autplay.playback.AndroidPlaybackSourceResolver
 import java.io.IOException
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -55,22 +59,24 @@ class DownloadIntentRepository(
     fun observeIntents(limit: Int = 100): Flow<List<DownloadIntentEntity>> =
         database.localAudioDao().observeDownloadIntents(limit.coerceIn(1, 100))
 
-    fun observePresentation(profileId: String?, limit: Int = 100): Flow<List<DownloadIntentPresentation>> {
-        val bounded = limit.coerceIn(1, 100)
+    fun observePresentation(profileId: String?, limit: Int = Int.MAX_VALUE): Flow<List<DownloadIntentPresentation>> {
+        val bounded = limit.coerceAtLeast(1)
         val rows = profileId?.let { database.localAudioDao().observeDownloadIntentsForProfile(it, bounded) }
             ?: database.localAudioDao().observeStandaloneDownloadIntents(bounded)
-        return rows.map { intents ->
-            val tracks = database.libraryDao().trackRefs(
-                intents.map(DownloadIntentEntity::localUserTrackRefId).distinct(),
-                bounded,
-            ).associateBy { it.localUserTrackRefId }
+        val profile = profileId ?: "legacy-unscoped"
+        return kotlinx.coroutines.flow.combine(rows, database.trackMetadataDao().changes(profile)) { intents, _ -> intents }.map { intents ->
+            val tracks = intents.map(DownloadIntentEntity::localUserTrackRefId).distinct().chunked(500)
+                .flatMap { ids -> database.libraryDao().trackRefs(ids, ids.size) }.associateBy { it.localUserTrackRefId }
+            val descriptions = tracks.keys.chunked(500).flatMap { database.trackMetadataDao().forTracks(profile, it) }
+                .associateBy { it.localUserTrackRefId }
             intents.map { intent ->
                 val track = tracks[intent.localUserTrackRefId]
+                val names = descriptions[intent.localUserTrackRefId]?.decoded().names(track?.rawTitle, track?.rawArtist)
                 DownloadIntentPresentation(
                     stableId = intent.downloadIntentId,
                     localUserTrackRefId = intent.localUserTrackRefId,
-                    title = track?.rawTitle,
-                    artist = track?.rawArtist,
+                    title = names.title,
+                    artist = names.artist,
                     state = intent.state,
                     failureCode = intent.failureCode,
                 )
@@ -79,20 +85,22 @@ class DownloadIntentRepository(
     }
 
     suspend fun cancel(intentId: String, profileId: String?, nowMs: Long): DownloadIntentEntity {
-        val current = requireNotNull(database.localAudioDao().downloadIntent(intentId)) { "DOWNLOAD_INTENT_NOT_FOUND" }
-        require(current.serverProfileId == profileId) { "DOWNLOAD_PROFILE_MISMATCH" }
-        require(current.state in CANCELLABLE_STATES) { "DOWNLOAD_CANCEL_NOT_ALLOWED" }
-        val cancelled = current.copy(
-            state = "CANCELLED",
-            failureCode = app.autplay.download.DownloadFailureCode.CANCELED.name,
-            updatedAtMs = nowMs,
-            completedAtMs = null,
-        )
-        database.localAudioDao().upsertDownloadIntent(cancelled)
+        val cancelled = database.withWriteTransaction {
+            val dao = database.localAudioDao()
+            val current = requireNotNull(dao.downloadIntent(intentId)) { "DOWNLOAD_INTENT_NOT_FOUND" }
+            require(current.serverProfileId == profileId) { "DOWNLOAD_PROFILE_MISMATCH" }
+            require(current.state in CANCELLABLE_STATES) { "DOWNLOAD_CANCEL_NOT_ALLOWED" }
+            current.copy(
+                state = "CANCELLED",
+                failureCode = app.autplay.download.DownloadFailureCode.CANCELED.name,
+                updatedAtMs = nowMs,
+                completedAtMs = null,
+            ).also { dao.upsertDownloadIntent(it) }
+        }
         DownloadService.sendRemoveDownload(
             applicationContext,
             AutPlayDownloadService::class.java,
-            current.media3DownloadId ?: current.downloadIntentId,
+            cancelled.media3DownloadId ?: cancelled.downloadIntentId,
             false,
         )
         return cancelled
@@ -161,16 +169,19 @@ class DownloadIntentRepository(
         storageClass: DownloadStorageClass,
         nowMs: Long,
         requestedBytes: Long? = null,
-    ): DownloadIntentEntity {
+    ): DownloadIntentEntity = requestMutex.withLock {
         require(storageClass != DownloadStorageClass.STREAM_CACHE)
         database.localAudioDao().downloadIntentsForTrack(trackRefId.value, MAX_TRACK_INTENTS)
             .firstOrNull { existing ->
                 existing.serverProfileId == profileId.value &&
                     existing.serverAudioVariantId == audioVariantId &&
                     existing.desiredStorageClass == storageClass.name &&
-                    existing.state !in setOf("FAILED", "CANCELLED")
+                    existing.state !in setOf("FAILED", "CANCELLED", "CANCELED")
             }
-            ?.let { return it }
+            ?.let { existing ->
+                if (existing.state == "REQUESTED") enqueue(existing)
+                return@withLock existing
+            }
         val intentId = LocalId.random().value
         val row = DownloadIntentEntity(
             downloadIntentId = intentId,
@@ -192,7 +203,7 @@ class DownloadIntentRepository(
         if (admission is StorageAdmission.Rejected) {
             val rejected = row.copy(state = "FAILED", failureCode = admission.failureCode.name)
             database.localAudioDao().upsertDownloadIntent(rejected)
-            return rejected
+            return@withLock rejected
         }
         if (admission is StorageAdmission.Evict) {
             admission.entries.forEach { entry ->
@@ -205,13 +216,13 @@ class DownloadIntentRepository(
             }
         }
         database.localAudioDao().upsertDownloadIntent(row)
-        DownloadService.sendAddDownload(
-            applicationContext,
-            AutPlayDownloadService::class.java,
-            row.toDownloadRequest(),
-            false,
-        )
-        return row
+        enqueue(row)
+        row
+    }
+
+    private fun enqueue(row: DownloadIntentEntity) {
+        DownloadService.sendAddDownload(applicationContext, AutPlayDownloadService::class.java,
+            row.toDownloadRequest(), false)
     }
 
     private suspend fun applyStorageAdmission(
@@ -250,8 +261,8 @@ class DownloadIntentRepository(
         )
     }
 
-    suspend fun reconcile(download: Download, finalException: Exception?, nowMs: Long) = withContext(Dispatchers.IO) {
-        val intent = database.localAudioDao().downloadIntentByMedia3Id(download.request.id) ?: return@withContext
+    suspend fun reconcile(download: Download, finalException: Exception?, nowMs: Long) = database.withWriteTransaction {
+        val intent = database.localAudioDao().downloadIntentByMedia3Id(download.request.id) ?: return@withWriteTransaction
         val coreIntent = DownloadIntentSnapshot(
             intentId = intent.downloadIntentId,
             localUserTrackRefId = intent.localUserTrackRefId,
@@ -267,7 +278,7 @@ class DownloadIntentRepository(
             coreIntent,
             DownloadIndexSnapshot(mapOf(media.downloadId to media)),
         )
-        if (!result.changes(coreIntent)) return@withContext
+        if (!result.changes(coreIntent)) return@withWriteTransaction
         database.localAudioDao().upsertDownloadIntent(
             intent.copy(
                 state = result.projectedState.toPersistedState(),
@@ -290,29 +301,21 @@ class DownloadIntentRepository(
         val intents = database.localAudioDao().downloadIntents(MAX_RECONCILE_INTENTS)
         for (intent in intents) {
             val download = observed[intent.media3DownloadId ?: intent.downloadIntentId]
+            if (intent.state in setOf("CANCELLED", "CANCELED")) {
+                if (download != null && download.state != Download.STATE_REMOVING) {
+                    withContext(Dispatchers.Main.immediate) { manager.removeDownload(download.request.id) }
+                }
+                continue
+            }
             if (download != null) {
                 reconcile(download, null, nowMs)
                 continue
             }
-            val coreIntent = intent.toSnapshot()
-            when (DownloadIntentReconciler.reconcile(coreIntent, DownloadIndexSnapshot(emptyMap())).command) {
-                is Media3Command.Enqueue -> intent.toDownloadRequestOrNull()?.let(manager::addDownload)
-                is Media3Command.Remove -> manager.removeDownload(coreIntent.media3DownloadId ?: coreIntent.intentId)
-                Media3Command.None -> Unit
+            if (intent.state in CANCELLABLE_STATES) intent.toDownloadRequestOrNull()?.let {
+                withContext(Dispatchers.Main.immediate) { manager.addDownload(it) }
             }
         }
     }
-
-    private fun DownloadIntentEntity.toSnapshot() = DownloadIntentSnapshot(
-        intentId = downloadIntentId,
-        localUserTrackRefId = localUserTrackRefId,
-        media3DownloadId = media3DownloadId,
-        storageClass = desiredStorageClass.toStorageClass(),
-        state = state.toIntentState(),
-        failureCode = failureCode?.let { code ->
-            runCatching { app.autplay.download.DownloadFailureCode.valueOf(code) }.getOrNull()
-        },
-    )
 
     private fun DownloadIntentEntity.toDownloadRequest(): DownloadRequest =
         requireNotNull(toDownloadRequestOrNull()) { "DOWNLOAD_INTENT_REFERENCE_INCOMPLETE" }
@@ -380,6 +383,7 @@ class DownloadIntentRepository(
         if (this == DownloadIntentState.CANCELED) "CANCELLED" else name
 
     private companion object {
+        val requestMutex = Mutex()
         val CANCELLABLE_STATES = setOf("REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED")
         const val MAX_TRACK_INTENTS = 32
         const val MAX_RECONCILE_INTENTS = 10_000

@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.CommandButton
 import androidx.media3.session.SessionCommand
@@ -17,6 +18,7 @@ internal object PlaybackNotification {
     const val ACTION_OPEN_PLAYER = "app.autplay.action.OPEN_PLAYER"
     const val ACTION_LIKE = "app.autplay.playback.LIKE"
     const val ACTION_DISLIKE = "app.autplay.playback.DISLIKE"
+    const val ACTION_LIBRARY_NEXT = "app.autplay.playback.LIBRARY_NEXT"
     const val EXTRA_QUEUE_ENTRY_ID = "queue_entry_id"
     const val EXTRA_OPEN_HANDLED = "app.autplay.extra.PLAYER_OPEN_HANDLED"
 
@@ -33,23 +35,40 @@ internal object PlaybackNotification {
         .buildUpon()
         .add(SessionCommand(ACTION_LIKE, Bundle.EMPTY))
         .add(SessionCommand(ACTION_DISLIKE, Bundle.EMPTY))
+        .add(SessionCommand(ACTION_LIBRARY_NEXT, Bundle.EMPTY))
         .build()
 
     @UnstableApi
-    fun buttons(context: Context, entryId: String?, preference: String?, enabled: Boolean): List<CommandButton> {
-        fun button(action: String, selected: Boolean, icon: Int, selectedIcon: Int, label: Int, slot: Int): CommandButton =
-            CommandButton.Builder(if (selected) selectedIcon else icon)
+    fun buttons(context: Context, entryId: String?, preference: String?, enabled: Boolean, libraryNext: Boolean = false): List<CommandButton> {
+        fun button(action: String, icon: Int, drawable: Int, label: Int): CommandButton =
+            CommandButton.Builder(icon)
+                .setCustomIconResId(drawable)
                 .setDisplayName(context.getString(label))
                 .setSessionCommand(SessionCommand(action, Bundle().apply { putString(EXTRA_QUEUE_ENTRY_ID, entryId) }))
                 // Platform media sessions project custom actions through the overflow slot.
-                .setSlots(slot, CommandButton.SLOT_OVERFLOW)
+                .setSlots(CommandButton.SLOT_OVERFLOW)
                 .setEnabled(enabled)
                 .build()
         return listOf(
-            button(ACTION_DISLIKE, preference == "DISLIKED", CommandButton.ICON_THUMB_DOWN_UNFILLED,
-                CommandButton.ICON_THUMB_DOWN_FILLED, R.string.action_dislike, CommandButton.SLOT_BACK_SECONDARY),
-            button(ACTION_LIKE, preference == "LIKED", CommandButton.ICON_THUMB_UP_UNFILLED,
-                CommandButton.ICON_THUMB_UP_FILLED, R.string.action_like, CommandButton.SLOT_FORWARD_SECONDARY),
+            CommandButton.Builder(CommandButton.ICON_NEXT)
+                .apply {
+                    if (libraryNext) setSessionCommand(SessionCommand(ACTION_LIBRARY_NEXT, Bundle().apply { putString(EXTRA_QUEUE_ENTRY_ID, entryId) }))
+                    else setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                }
+                .setDisplayName(context.getString(R.string.player_next_track))
+                .setSlots(CommandButton.SLOT_FORWARD)
+                .build(),
+            CommandButton.Builder(CommandButton.ICON_PREVIOUS)
+                .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .setDisplayName(context.getString(R.string.player_previous_track))
+                .setSlots(CommandButton.SLOT_BACK)
+                .build(),
+            button(ACTION_LIKE, if (preference == "LIKED") CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED,
+                if (preference == "LIKED") R.drawable.ic_autplay_favorite_filled else R.drawable.ic_autplay_favorite,
+                R.string.action_like),
+            button(ACTION_DISLIKE, CommandButton.ICON_UNDEFINED,
+                if (preference == "DISLIKED") R.drawable.ic_autplay_heart_off_filled else R.drawable.ic_autplay_heart_off,
+                R.string.action_dislike),
         )
     }
 }

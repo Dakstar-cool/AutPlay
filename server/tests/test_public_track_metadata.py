@@ -123,6 +123,8 @@ def test_embedded_tags_preserve_date_precision_and_ignore_invalid_values() -> No
     assert fields_from_tags(
         {
             "ALBUM": "Record",
+            "COMPOSER": "Writer Name",
+            "ARTIST": "Cover Band",
             "DATE": "2001-04",
             "YEAR": "2001",
             "ORIGINALDATE": "1998",
@@ -134,6 +136,8 @@ def test_embedded_tags_preserve_date_precision_and_ignore_invalid_values() -> No
         }
     ) == {
         "album": "Record",
+        "composer": "Writer Name",
+        "artist": "Cover Band",
         "release_date": "2001-04",
         "original_release_date": "1998",
         "track_number": 3,
@@ -560,3 +564,44 @@ def test_occurrence_lookup_needs_recording_and_edition_context() -> None:
         MusicBrainzMetadataProvider(Http({})).search(
             MetadataQuery("Song", "Artist", release_track_mbid=str(UUID(int=108)))
         )
+
+
+def test_search_abbreviations_never_become_identity_evidence() -> None:
+    from autplay.domain.track_metadata import MetadataCandidate, metadata_search_terms
+
+    query = MetadataQuery(
+        "A Very Long Composition Title (Official Video)", "Alice Cooper", duration_ms=180000
+    )
+    terms = metadata_search_terms(query.title, query.artist)
+    assert terms[0] == (query.title, query.artist)
+    assert terms[-2:] == (
+        ("A Very Long Composition", "Alice Cooper"),
+        ("A Very Long Composition", "Alice"),
+    )
+    candidate = MetadataCandidate(
+        "test", {"title": "A Very Long Composition", "artist": "Alice"}, 180000, 100, "test"
+    )
+    assert not candidate.exact_for(query)
+
+
+def test_search_continues_past_studio_hit_to_matching_session() -> None:
+    query = MetadataQuery(
+        "Life is wasted on the living | Monitor Sessions", "Moto Boy", duration_ms=223000
+    )
+
+    class SessionHttp(Http):
+        def json(self, url: str, *, post: bytes | None = None) -> dict[str, Any]:
+            self.urls.append(url)
+            expression = parse_qs(urlsplit(url).query)["query"][0]
+            item = recording(1, 223000, [10])
+            item.update(
+                title="Life is wasted on the living", **{"artist-credit": [{"name": "Moto Boy"}]}
+            )
+            if "Sessions" not in expression:
+                item.update(id=str(UUID(int=2)), disambiguation="Monitor Sessions")
+            return {"count": 1, "recordings": [item]}
+
+    http = SessionHttp({})
+    match = automatic_candidate(query, MusicBrainzMetadataProvider(http).search(query))
+    assert match and match.fields["mb_recording_id"] == str(UUID(int=2))
+    assert len(http.urls) >= 2

@@ -5,11 +5,14 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Request
+from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from autplay.application.acquisition_control import MAX_PLAYLIST_BYTES, AcquisitionControlService
+from autplay.application.music_preservation import reports, request_run
+from autplay.domain.auth import AccountRole
 from autplay.domain.discovery import DiscoveryCandidate, DiscoveryError, ProviderArtistTracks
 from autplay.domain.web_admin import AuthenticatedWebSession, WebAdminError
 from autplay.entrypoints.admin_web_http import Renderer, WebAdminHttp
@@ -32,6 +35,7 @@ def create_acquisition_control_router(
     acquisition: AcquisitionControlService,
     renderer: Renderer,
     origin: str,
+    preservation_sessions: sessionmaker[Session] | None = None,
     discovery_enabled: bool = False,
     discovery: ManualDiscoveryHttp | None = None,
 ) -> APIRouter:
@@ -54,6 +58,10 @@ def create_acquisition_control_router(
     ) -> Response:
         selected = locale(request)
         queues = acquisition.queues(authenticated.actor)
+        preservation = None
+        if preservation_sessions is not None:
+            with preservation_sessions() as session:
+                preservation = reports(session, authenticated.actor.user_id)
         content = renderer.render(
             "acquisition_control.html",
             locale=selected,
@@ -79,6 +87,8 @@ def create_acquisition_control_router(
                 "live": request.query_params.get("live") == "1",
                 "discovery_enabled": discovery_enabled,
                 "queues": queues,
+                "preservation": preservation,
+                "scan_operation_id": str(uuid4()),
                 "agent_online": acquisition.agent_online(authenticated.actor),
                 "agent_sources": acquisition.agent_sources(authenticated.actor),
                 "action_operation_ids": {
@@ -160,6 +170,27 @@ def create_acquisition_control_router(
                     RedirectResponse("/admin/login", status_code=303)
                 )
             return problem(request, error.code, 403)
+
+    @router.post("/preservation/scan")
+    async def scan(request: Request) -> Response:
+        try:
+            form = parse_urlencoded_form(
+                request.headers.get("content-type"),
+                await request.body(),
+                allowed_fields=frozenset({"csrf_token", "operation_id"}),
+            )
+            actor = authorized(request, form["csrf_token"], form["operation_id"]).actor
+            if actor.role != AccountRole.OWNER:
+                raise WebAdminError("forbidden")
+            if preservation_sessions is None:
+                return problem(request, "preservation_unavailable", 503)
+            with preservation_sessions.begin() as session:
+                request_run(session, actor.user_id, UUID(form["operation_id"]))
+            return apply_admin_security_headers(
+                RedirectResponse("/admin/acquisition#preservation", status_code=303)
+            )
+        except ValueError, KeyError, WebAdminError:
+            return problem(request, "preservation_scan_rejected", 403)
 
     @router.post("/upload")
     async def upload(request: Request) -> Response:

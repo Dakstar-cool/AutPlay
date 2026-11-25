@@ -16,6 +16,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Load the ACL cmdlets shipped with this host when launched from another PowerShell edition.
+Import-Module -Name (Join-Path $PSHOME "Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1") -ErrorAction Stop
+
 function ConvertTo-PlainText {
     param([Security.SecureString]$Value)
 

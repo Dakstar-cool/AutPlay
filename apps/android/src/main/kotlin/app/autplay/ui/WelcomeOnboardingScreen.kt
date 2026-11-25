@@ -41,15 +41,18 @@ import app.autplay.application.social.normalizeSocialPublicId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-/** Creates the required account locally before opening the music library. */
+/** First-run account creation and existing-account sign-in. */
 @Composable
 public fun WelcomeOnboardingScreen(
     onComplete: suspend (UiDestination, String) -> Boolean,
     modifier: Modifier = Modifier,
     initialPublicId: String? = null,
     createAccount: (suspend (String, CharArray) -> Boolean)? = null,
-    existingAccount: (suspend (String) -> Boolean)? = null,
+    existingAccount: (suspend (String, String, CharArray) -> Boolean)? = null,
+    onExitSignIn: () -> Unit = {},
 ) {
+    var signingIn by rememberSaveable { mutableStateOf(false) }
+    var server by rememberSaveable { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var saveFailed by rememberSaveable { mutableStateOf(false) }
     var publicIdInput by rememberSaveable { mutableStateOf(initialPublicId.orEmpty()) }
@@ -57,18 +60,26 @@ public fun WelcomeOnboardingScreen(
     var password by remember { mutableStateOf("") }
     var passwordConfirmation by remember { mutableStateOf("") }
     val publicId = normalizeSocialPublicId(publicIdInput)
-    val passwordValid = createAccount == null || PortableAccountCrypto.validPassword(password.toCharArray())
+    val passwordValid = signingIn || createAccount == null || PortableAccountCrypto.validPassword(password.toCharArray())
     val passwordsMatch = createAccount == null || password == passwordConfirmation
-    val ready = publicId != null && passwordValid && passwordsMatch
+    val ready = publicId != null && if (signingIn) server.isNotBlank() && password.isNotEmpty() else passwordValid && passwordsMatch
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
-    SecureAccountWindow(createAccount != null)
+    SecureAccountWindow(createAccount != null || signingIn)
     BackHandler(enabled = saving) { /* Keep the in-flight account transaction on this screen. */ }
 
-    fun submit(existing: Boolean) {
+    fun changeMode(existing: Boolean) {
+        if (signingIn && !existing) onExitSignIn()
+        signingIn = existing
+        password = ""
+        passwordConfirmation = ""
+        saveFailed = false
+    }
+    BackHandler(enabled = signingIn && !saving) { changeMode(false) }
+    fun submit() {
         val selectedId = publicId ?: return
-        if (saving || (!existing && !ready)) return
+        if (saving || !ready) return
         saving = true
         saveFailed = false
         keyboard?.hide()
@@ -76,8 +87,8 @@ public fun WelcomeOnboardingScreen(
         scope.launch {
             val material = password.toCharArray()
             try {
-                val completed = if (existing) {
-                    existingAccount?.invoke(selectedId) == true
+                val completed = if (signingIn) {
+                    existingAccount?.invoke(server.trim(), selectedId, material) == true
                 } else {
                     val created = createAccount?.invoke(selectedId, material) ?: true
                     created && onComplete(UiDestination.Home, selectedId)
@@ -104,9 +115,19 @@ public fun WelcomeOnboardingScreen(
             .padding(horizontal = AutPlayTokens.dimensions.screenPadding, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(stringResource(R.string.onboarding_welcome_title),
+        Text(stringResource(if (signingIn) R.string.onboarding_sign_in_title else R.string.onboarding_welcome_title),
             style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text(stringResource(R.string.onboarding_welcome_body), style = MaterialTheme.typography.bodyLarge)
+        if (existingAccount != null) {
+            OutlinedButton(onClick = { changeMode(!signingIn) }, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(if (signingIn) R.string.portable_account_create else R.string.portable_account_existing))
+            }
+        }
+        if (signingIn) {
+            OutlinedTextField(value = server, onValueChange = { server = it.take(2048); saveFailed = false },
+                label = { Text(stringResource(R.string.profile_server_origin)) }, enabled = !saving,
+                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+                modifier = Modifier.fillMaxWidth())
+        } else Text(stringResource(R.string.onboarding_welcome_body), style = MaterialTheme.typography.bodyLarge)
         OutlinedTextField(
             value = publicIdInput,
             onValueChange = { publicIdInput = it.take(64); saveFailed = false },
@@ -118,21 +139,22 @@ public fun WelcomeOnboardingScreen(
             keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (createAccount != null) {
+        if (createAccount != null || signingIn) {
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it.take(256); saveFailed = false },
                 label = { Text(stringResource(R.string.portable_account_password)) },
-                supportingText = { Text(stringResource(if (password.isNotEmpty() && !passwordValid)
+                supportingText = { if (!signingIn) Text(stringResource(if (password.isNotEmpty() && !passwordValid)
                     R.string.onboarding_password_invalid else R.string.portable_account_password_rules)) },
-                isError = password.isNotEmpty() && !passwordValid,
+                isError = !signingIn && password.isNotEmpty() && !passwordValid,
                 enabled = !saving, singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
-                keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password,
+                    imeAction = if (signingIn) ImeAction.Done else ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }, onDone = { submit() }),
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(
+            if (!signingIn) OutlinedTextField(
                 value = passwordConfirmation,
                 onValueChange = { passwordConfirmation = it.take(256); saveFailed = false },
                 label = { Text(stringResource(R.string.portable_account_password_repeat)) },
@@ -148,7 +170,7 @@ public fun WelcomeOnboardingScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        Text(stringResource(R.string.onboarding_local_note), style = MaterialTheme.typography.bodyMedium,
+        if (!signingIn) Text(stringResource(R.string.onboarding_local_note), style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (!ready && !saving) {
             Text(stringResource(R.string.onboarding_required_fields), style = MaterialTheme.typography.bodySmall)
@@ -158,16 +180,10 @@ public fun WelcomeOnboardingScreen(
             Text(stringResource(R.string.onboarding_saving), style = MaterialTheme.typography.bodyMedium)
         }
         if (saveFailed) {
-            Text(stringResource(R.string.onboarding_save_failed), color = MaterialTheme.colorScheme.error)
+            Text(stringResource(if (signingIn) R.string.portable_account_operation_failed else R.string.onboarding_save_failed), color = MaterialTheme.colorScheme.error)
         }
-        Button(onClick = { submit(false) }, enabled = !saving && ready, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.onboarding_continue_local))
-        }
-        if (existingAccount != null) {
-            OutlinedButton(onClick = { submit(true) }, enabled = !saving && publicId != null,
-                modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.portable_account_existing))
-            }
+        Button(onClick = ::submit, enabled = !saving && ready, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(if (signingIn) R.string.portable_account_sign_in else R.string.onboarding_continue_local))
         }
     }
 }

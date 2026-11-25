@@ -22,6 +22,7 @@
     "journal_epoch": {"$ref": "#/$defs/uuid"},
     "from_cursor": {"$ref": "#/$defs/nullableCursor"},
     "next_cursor": {"$ref": "#/$defs/cursor"},
+    "personal_library_version": {"const": 1, "description": "Negotiated PERSONAL_LIBRARY_V1 projection. Library entries include personal_save."},
     "has_more": {"type": "boolean"},
     "events": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/serverEvent"}},
     "server_time": {"type": "string", "format": "date-time"}

@@ -14,6 +14,10 @@ from autplay.adapters.postgresql.models import (
     UserAccountRow,
     UserTrackRefRow,
 )
+from autplay.adapters.postgresql.models.track_metadata import (
+    TrackMetadataRevisionRow,
+    TrackMetadataRow,
+)
 from autplay.adapters.postgresql.resource_limits import lock_resource_admission
 from autplay.application.music_library import MusicLibraryService
 from sqlalchemy import create_engine, func, select
@@ -36,7 +40,7 @@ def test_preparing_identity_joins_single_connection_and_rolls_back_with_caller(
                 UserTrackRefRow(
                     user_track_ref_id=ref_id,
                     user_id=owner,
-                    raw_title="Test",
+                    raw_title="Evening_song_-_Synthetic",
                     raw_artist="Synthetic",
                 )
             )
@@ -58,7 +62,13 @@ def test_preparing_identity_joins_single_connection_and_rolls_back_with_caller(
         with sessions() as session:
             ref = present(session.get(UserTrackRefRow, ref_id))
             assert ref.recording_id is None and ref.current_match_decision_id is None
-            for model in (ArtistRow, RecordingRow, MatchDecisionRow, SyncEventRow):
+            for model in (
+                ArtistRow,
+                RecordingRow,
+                MatchDecisionRow,
+                SyncEventRow,
+                TrackMetadataRow,
+            ):
                 assert session.scalar(select(func.count()).select_from(model)) == 0
         with sessions.begin() as session:
             lock_resource_admission(session)
@@ -67,5 +77,10 @@ def test_preparing_identity_joins_single_connection_and_rolls_back_with_caller(
         with sessions() as session:
             assert present(session.get(UserTrackRefRow, ref_id)).recording_id == recording
             assert session.scalar(select(func.count()).select_from(RecordingRow)) == 1
+            assert (
+                present(session.get(TrackMetadataRow, ref_id)).document["fields"]["title"]
+                == "Evening song"
+            )
+            assert session.scalar(select(func.count()).select_from(TrackMetadataRevisionRow)) == 1
     finally:
         engine.dispose()

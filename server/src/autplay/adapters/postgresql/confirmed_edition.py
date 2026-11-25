@@ -28,6 +28,7 @@ from autplay.adapters.postgresql.models import (
 from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRow
 from autplay.domain.import_identity import normalize_text
 from autplay.domain.track_metadata import MetadataCandidate
+from autplay.domain.track_names import track_names
 
 
 def _key(kind: str, identity: str) -> UUID:
@@ -93,7 +94,9 @@ def _credit(session: Session, provider: UUID, members: list[dict[str, str]]) -> 
             dict(
                 position=len(names),
                 artist_id=ref.artist_id,
-                credited_name=item["credited_name"],
+                credited_name=item["name"]
+                if item.get("legal_name") == item["credited_name"]
+                else item["credited_name"],
                 join_phrase=item["join_phrase"],
                 role=item["role"],
             )
@@ -216,9 +219,12 @@ def project_edition(session: Session, ref: UserTrackRefRow, snapshot: dict[str, 
             .join(ArtistCreditNameRow, ArtistCreditNameRow.artist_id == ArtistRow.artist_id)
             .where(ArtistCreditNameRow.artist_credit_id == recording.artist_credit_id)
         ).all()
+        _, derived_artist = track_names(ref.raw_title, ref.raw_artist)
+        old_name = members[0][1] if len(members) == 1 else None
         if (
-            [(status, name) for status, name in members]
-            != [("PROVISIONAL", ref.raw_artist or "Unknown artist")]
+            old_name not in {ref.raw_artist or "Unknown artist", derived_artist or "Unknown artist"}
+            or len(members) != 1
+            or members[0][0] != "PROVISIONAL"
             or recording.identity_status != "PROVISIONAL"
             or recording.row_version != 1
             or old is None

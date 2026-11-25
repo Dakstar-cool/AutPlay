@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -251,6 +252,7 @@ public fun NowPlayingScreen(
     artists: List<app.autplay.application.artist.ArtistSummary> = emptyList(),
     onOpenArtist: (String) -> Unit = {},
     onAddToPlaylist: (() -> Unit)? = null,
+    requestPhoneAudio: (() -> Unit)? = null,
     serverConnection: PlayerServerConnection = PlayerServerConnection.Offline,
     onChooseArtists: (() -> Unit)? = null,
 ) {
@@ -429,6 +431,10 @@ public fun NowPlayingScreen(
                         PlayerArtistLink(state.artist, artists, openArtists)
                         PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
                         DirectControlMessage(state)
+                        if (requestPhoneAudio != null && (state.controls as? PlaybackControlGate.Locked)?.reason ==
+                            PlaybackControlLockReason.SOURCE_UNAVAILABLE) {
+                            OutlinedButton(onClick = requestPhoneAudio) { Text(stringResource(R.string.player_find_phone_audio)) }
+                        }
                     }
                 }
                 PlayerTransportControls(state, swipeTargets, onPrevious, onNext, onTogglePlayPause,
@@ -586,13 +592,13 @@ private fun PlayerSecondaryControls(
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         PlayerModeButton(
             icon = AutPlayIcon.Repeat,
-            label = stringResource(repeatLabel(state.repeatMode)),
-            stateLabel = stringResource(repeatLabel(state.repeatMode)),
+            label = stringResource(if (state.repeatOnce) R.string.player_repeat_once else repeatLabel(state.repeatMode)),
+            stateLabel = stringResource(if (state.repeatOnce) R.string.player_repeat_once else repeatLabel(state.repeatMode)),
             active = state.repeatMode != RepeatModePresentation.Off,
             enabled = state.repeatEnabled,
             onClick = onCycleRepeat,
             tag = "player-repeat",
-            one = state.repeatMode == RepeatModePresentation.One,
+            one = state.repeatOnce,
         )
         if (serverConnection != PlayerServerConnection.Offline) {
             val saved = downloadState == "COMPLETED" || state.source == PlaybackSourcePresentation.Download
@@ -854,7 +860,7 @@ private fun PrimaryTransportButton(
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun PlaybackTimeline(
+internal fun PlaybackTimeline(
     state: PlaybackPresentationState,
     onSeekBegin: (Long) -> Unit,
     onSeekUpdate: (Long) -> Unit,
@@ -895,16 +901,11 @@ private fun PlaybackTimeline(
             },
             valueRange = 0f..duration.toFloat(),
             enabled = state.canSeek,
-            thumb = {
-                Box(
-                    Modifier.size(12.dp).background(
-                        if (state.canSeek) MaterialTheme.colorScheme.primary else AutPlayTokens.colors.mutedText,
-                        CircleShape,
-                    ),
-                )
-            },
-            track = {
-                PlaybackProgressTrack(state, Modifier.fillMaxWidth().height(4.dp))
+            // Slider uses this width to map gestures to the usable track length.
+            thumb = { Spacer(Modifier.size(12.dp)) },
+            track = { slider ->
+                PlaybackProgressTrack(state, Modifier.fillMaxWidth().height(12.dp),
+                    thumbFraction = slider.value / duration.toFloat())
             },
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
                 contentDescription = accessibilityLabel
@@ -927,17 +928,30 @@ private fun PlaybackProgressTrack(
     state: PlaybackPresentationState,
     modifier: Modifier,
     colors: ColorScheme = MaterialTheme.colorScheme,
+    thumbFraction: Float? = null,
 ) {
+    val thumbColor = if (state.canSeek) colors.primary else AutPlayTokens.colors.mutedText
     val duration = state.durationMs?.takeIf { it > 0 } ?: 1L
     val played = (state.seekPreviewPositionMs ?: state.positionMs).coerceIn(0, duration).toFloat() / duration
     val buffered = state.bufferedPositionMs.coerceIn(0, duration).toFloat() / duration
     Canvas(modifier) {
-        val radius = CornerRadius(size.height / 2f)
-        // The hairline keeps the unplayed range visible even on the steel mini-player surface.
-        drawRoundRect(colors.surfaceVariant, cornerRadius = radius)
+        val height = if (thumbFraction == null) size.height else 4.dp.toPx()
+        val top = (size.height - height) / 2f
+        val radius = CornerRadius(height / 2f)
+        val rtl = layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl
+        fun segment(color: Color, fraction: Float) {
+            val width = size.width * fraction
+            drawRoundRect(color, Offset(if (rtl) size.width - width else 0f, top),
+                androidx.compose.ui.geometry.Size(width, height), radius)
+        }
+        segment(colors.surfaceVariant, 1f)
         drawLine(colors.outline, Offset(0f, center.y), Offset(size.width, center.y), strokeWidth = 1.dp.toPx())
-        drawRoundRect(colors.outlineVariant, size = size.copy(width = size.width * buffered), cornerRadius = radius)
-        drawRoundRect(colors.primary, size = size.copy(width = size.width * played), cornerRadius = radius)
+        segment(colors.outlineVariant, buffered)
+        val fraction = thumbFraction ?: played
+        segment(colors.primary, fraction)
+        if (thumbFraction != null) {
+            drawCircle(thumbColor, 6.dp.toPx(), Offset(size.width * (if (rtl) 1f - fraction else fraction), center.y))
+        }
     }
 }
 
@@ -1010,7 +1024,8 @@ internal fun PlayerArtistPicker(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    AutPlayArtwork(artist.name, Modifier.clearAndSetSemantics {}, size = 48.dp)
+                    val portrait = app.autplay.ui.rememberLibraryPortrait(artist.name, artist.portraitTrackIds, artist.portraitArtistIds)
+                    app.autplay.ui.ArtistAvatar(artist.name, portrait, Modifier.clearAndSetSemantics {})
                     Column {
                         Text(artist.name)
                         artist.disambiguation?.let { Text(it, style = MaterialTheme.typography.bodySmall) }

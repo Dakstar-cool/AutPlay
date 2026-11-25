@@ -335,8 +335,8 @@ class OfflineRecommendationRepositoryTest {
             ),
         )
 
-        val ownedArtistReleases = database.recommendationPackDao().recentRelevantReleases(PROFILE, USER, 10)
-        val otherProfileReleases = database.recommendationPackDao().recentRelevantReleases(OTHER_PROFILE, OTHER_USER, 10)
+        val ownedArtistReleases = database.recommendationPackDao().recentRelevantReleases(PROFILE, USER, "2026-08-11", "2026-08-17")
+        val otherProfileReleases = database.recommendationPackDao().recentRelevantReleases(OTHER_PROFILE, OTHER_USER, "2026-08-11", "2026-08-17")
         assertEquals(listOf(RELEASE), ownedArtistReleases.map { it.localReleaseId })
         assertTrue(otherProfileReleases.isEmpty())
     }

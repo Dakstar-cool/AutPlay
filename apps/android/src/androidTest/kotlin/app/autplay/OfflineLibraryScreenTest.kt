@@ -167,6 +167,8 @@ class OfflineLibraryScreenTest {
         val queueId = requireNotNull(PlaybackRuntimeState.state.value.queueSnapshotId)
         val hero = hasAnyAncestor(hasTestTag("home-playback-hero"))
         val pause = hasContentDescription(strings.getString(R.string.action_pause)) and hero
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(pause).fetchSemanticsNodes().isNotEmpty() }
+        saveUiScreenshot("home-artist-glow")
         composeRule.onNode(pause).performClick()
         composeRule.waitUntil(10_000) { !PlaybackRuntimeState.state.value.isPlaying }
         composeRule.onNodeWithTag("home-wave-wheel").assertIsDisplayed()
@@ -174,12 +176,15 @@ class OfflineLibraryScreenTest {
         runBlocking { stopPlaybackService() }
         scenario = ActivityScenario.launch(MainActivity::class.java)
         composeRule.waitUntil(15_000) { composeRule.onAllNodes(start).fetchSemanticsNodes().isNotEmpty() }
-        composeRule.onNodeWithText("Линия моря — $title").assertIsDisplayed()
+        val resumedSong = hasText("Линия моря — $title")
+        composeRule.waitUntil(15_000) { composeRule.onAllNodes(resumedSong).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNodeWithTag("home-product-list").performScrollToNode(resumedSong)
+        composeRule.onNode(resumedSong).assertIsDisplayed()
         composeRule.onNodeWithTag("home-wave-wheel").assertIsDisplayed()
         composeRule.onNodeWithTag("home-track-carousel").assertDoesNotExist()
         composeRule.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
         saveUiScreenshot("home-review-ready")
-        composeRule.onNode(start).performClick()
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.action_continue)).performClick()
         composeRule.waitUntil(15_000) { PlaybackRuntimeState.state.value.isPlaying }
         composeRule.onNode(pause).assertIsDisplayed()
         composeRule.onNodeWithTag("home-track-carousel").assertIsDisplayed()
@@ -294,7 +299,8 @@ class OfflineLibraryScreenTest {
         composeRule.onNodeWithTag("mini-player-track", useUnmergedTree = true).performTouchInput { click() }
         composeRule.onNodeWithTag("now-playing-panel").assertIsDisplayed()
         composeRule.onNodeWithTag("player-repeat").performClick()
-        composeRule.onNodeWithContentDescription(strings.getString(R.string.player_repeat_all)).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.player_repeat_once)).performClick()
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.player_repeat_one)).assertIsDisplayed()
         val collapse = composeRule.onNodeWithContentDescription(strings.getString(R.string.player_collapse))
         collapse.performClick()
         awaitTrack(last, "На рассвете", false, previous, next)
@@ -437,30 +443,19 @@ class OfflineLibraryScreenTest {
 
     @Test
     @SdkSuppress(minSdkVersion = 29)
-    fun homeAlbumRailOpensTheSelectedReleaseAndRecentRowPlaysLocalAudio() = runBlocking {
+    fun homeWithoutRecommendationsOmitsAlbumsAndRecentRowPlaysLocalAudio() = runBlocking {
         val title = "Обратный путь"
         val trackId = importPlayableSample(title)
         val db = AutPlayRuntime.database(context)
         val recordingId = LocalId.random().value
         db.catalogProjectionDao().upsertRecordings(listOf(recording(recordingId, title)))
         db.libraryDao().upsertTrackRef(requireNotNull(db.libraryDao().trackRef(trackId.value)).copy(localRecordingId = recordingId))
-        val albums = seedReleases(recordingId, listOf("Полярный свет", "Белая ночь", "Равновесие", "Течение", "Северный ветер"))
+        seedReleases(recordingId, listOf("Library album"))
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        val strip = composeRule.onNodeWithTag("home-release-strip")
-        composeRule.waitUntil(15_000) { composeRule.onAllNodesWithTag("home-release-strip").fetchSemanticsNodes().isNotEmpty() }
+        composeRule.waitUntil(15_000) { composeRule.onAllNodesWithTag("home-product-list").fetchSemanticsNodes().isNotEmpty() }
         composeRule.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-recent"))
         composeRule.onNodeWithTag("home-recent").assert(hasText(title)).assertIsDisplayed()
-        saveUiScreenshot("home-album-rail")
-        strip.performTouchInput { swipeLeft() }
-        strip.performScrollToNode(hasTestTag("home-release:${albums.last().first}"))
-        composeRule.onNodeWithTag("home-release:${albums.last().first}").performTouchInput { click() }
-        composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithTag("home-product-list").fetchSemanticsNodes().isEmpty() &&
-                composeRule.onAllNodesWithText(albums.last().second).fetchSemanticsNodes().isNotEmpty()
-        }
-        val strings = localizedAppContext(context, AppLanguage.Russian)
-        waitForNavigation(strings.getString(R.string.nav_home)).performClick()
-        composeRule.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-recent"))
+        composeRule.onNodeWithTag("home-release-strip").assertDoesNotExist()
         composeRule.onNodeWithTag("home-recent").performTouchInput { click() }
         composeRule.waitUntil(15_000) {
             PlaybackRuntimeState.state.value.let { it.isPlaying && it.localUserTrackRefId == trackId.value }
@@ -768,7 +763,8 @@ class OfflineLibraryScreenTest {
         checkCover()
         saveUiScreenshot("detail-album")
         tag("collection-open-artist").performClick()
-        awaitTag("artist-album-${pages.serverAlbum}")
+        awaitTag("artist-header")
+        tag("collection-details").performScrollToNode(hasTestTag("artist-album-${pages.serverAlbum}"))
         back()
         awaitTag("collection-listen")
         tag("collection-listen").performClick()
@@ -778,8 +774,10 @@ class OfflineLibraryScreenTest {
         composeRule.onNodeWithTag("mini-player-track", useUnmergedTree = true).performTouchInput { click() }
         awaitTag("player-open-artist")
         tag("player-open-artist").performClick()
-        awaitTag("artist-album-${pages.serverAlbum}")
+        awaitTag("artist-header")
+        tag("collection-details").performScrollToNode(hasText(strings.getString(R.string.detail_artist_popular)))
         composeRule.onNodeWithText(strings.getString(R.string.detail_artist_popular)).assertIsDisplayed()
+        tag("collection-details").performScrollToNode(hasTestTag("artist-track-${pages.recordings[1]}"))
         tag("artist-track-${pages.recordings[1]}").assertIsDisplayed()
         saveUiScreenshot("detail-artist")
         tag("collection-details").performScrollToNode(hasText(strings.getString(R.string.detail_artist_info)))
@@ -790,7 +788,8 @@ class OfflineLibraryScreenTest {
         tag("artist-album-${pages.serverAlbum}").performClick()
         awaitTag("collection-listen")
         back()
-        awaitTag("artist-album-${pages.serverAlbum}")
+        awaitTag("collection-details")
+        tag("collection-details").performScrollToNode(hasTestTag("artist-album-${pages.serverAlbum}"))
         back()
         awaitTag("player-open-artist")
         back()
@@ -984,8 +983,10 @@ class OfflineLibraryScreenTest {
         val home = node("home-product-list")
         home.performScrollToNode(hasTestTag("home-recent"))
         composeRule.onAllNodesWithTag("home-recent")[0].assertIsDisplayed()
-        home.performScrollToNode(hasTestTag("home-release-strip"))
-        shown("home-release:${pages.album}").performClick()
+        waitForNavigation(strings.getString(R.string.nav_library)).performClick()
+        node("library-sections").performScrollToNode(hasTestTag("library-tab-Albums"))
+        shown("library-tab-Albums").performClick()
+        shown("library-album:${pages.album}").performClick()
         shown("album-track-${pages.albumEntries.last()}")
         shown("collection-open-artist").performClick()
         shown("artist-track-${pages.recordings.last()}")
@@ -1106,12 +1107,11 @@ class OfflineLibraryScreenTest {
 
         scenario = ActivityScenario.launch(MainActivity::class.java)
         openLibrary()
-        val reviewTab = hasTestTag("library-tab-Review")
-        composeRule.onNodeWithTag("library-sections").assertIsDisplayed().performScrollToNode(reviewTab)
-        composeRule.onNode(reviewTab).performClick()
-        val openReview = hasText(defaultStrings.getString(R.string.nav_import_review)) and hasClickAction()
-        scrollLibraryTo(openReview)
-        composeRule.onNode(openReview).assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("library-tab-Review").assertDoesNotExist()
+        waitForNavigation(defaultStrings.getString(R.string.nav_home)).performClick()
+        val openReview = hasText(defaultStrings.getString(R.string.home_problems_open)) and hasClickAction()
+        composeRule.onNodeWithTag("home-product-list").performScrollToNode(openReview)
+        composeRule.onNode(openReview).performClick()
         composeRule.onNodeWithTag("library-product-list").assertDoesNotExist()
         val importSummary = defaultStrings.getString(R.string.import_summary, 1)
         composeRule.waitUntil(timeoutMillis = 10_000) {

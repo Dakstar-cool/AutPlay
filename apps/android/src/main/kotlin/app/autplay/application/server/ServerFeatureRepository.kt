@@ -1,5 +1,7 @@
 package app.autplay.application.server
 
+import app.autplay.application.library.PlaylistImportFile
+import app.autplay.application.library.SharedPlaylist
 import app.autplay.application.recommendation.PersonalWaveSession
 import app.autplay.application.recommendation.LIKED_ORIGINAL_VERSION
 import app.autplay.data.security.CredentialStore
@@ -20,6 +22,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -226,6 +229,12 @@ class ServerFeatureRepository(
             expectBody = true, binary = true).bytes)
     }
 
+    suspend fun catalogArtistPortrait(id: String): ByteArray {
+        catalogueUuid(id)
+        return checkNotNull(authorizedRaw(Request.Builder().url("$apiBaseUrl/music/discovery/artists/$id/portrait").get().build(),
+            expectBody = true, binary = true).bytes)
+    }
+
     suspend fun metadataArtwork(refId: String, sha: String): ByteArray {
         requireUuidLike(refId)
         require(SHA256_REGEX.matches(sha))
@@ -272,6 +281,26 @@ class ServerFeatureRepository(
         val result = musicPost("/playlist-shares", snapshot)
         val token = java.util.UUID.fromString(result.getValue("token").jsonPrimitive.content)
         return "$apiBaseUrl/playlist-shares/$token"
+    }
+
+    suspend fun openPlaylistLink(value: String): PlaylistImportFile {
+        val url = value.trim().toHttpUrl()
+        val configured = apiBaseUrl.toHttpUrl()
+        val sameServer = url.scheme == configured.scheme && url.host == configured.host && url.port == configured.port
+        require((sameServer || url.isHttps) && url.username.isEmpty() && url.password.isEmpty() &&
+            url.query == null && url.fragment == null)
+        val path = url.encodedPath.trimEnd('/').removeSuffix("/file")
+        val token = java.util.UUID.fromString(path.substringAfterLast('/')).toString()
+        require(path.endsWith("/api/v1/playlist-shares/$token"))
+        val document = client.newCall(Request.Builder().url(url.newBuilder().encodedPath("$path/file").build())
+            .get().build()).readCancellable { response ->
+            require(response.isSuccessful)
+            SharedPlaylist.decode(response.body.readBoundedBytes(SharedPlaylist.MAX_FILE_BYTES))
+        }
+        require(document.token == token)
+        val copy = PlaylistImportFile(document)
+        return if (sameServer && path == configured.encodedPath + "/playlist-shares/$token") copy
+            else copy.copy(shareToken = null, tracks = copy.tracks.map { it.copy(recordingId = null) })
     }
 
     private suspend fun musicPost(path: String, body: JsonObject): JsonObject = authorized(Request.Builder()
@@ -326,6 +355,13 @@ class ServerFeatureRepository(
         }
     }
 
+    suspend fun artistOverview(artistId: String, baseline: String?): JsonObject {
+        catalogueUuid(artistId)
+        val url = "$apiBaseUrl/music/discovery/artists/$artistId/overview".toHttpUrl().newBuilder()
+        if (baseline != null) url.addQueryParameter("baseline", catalogueUuid(baseline))
+        return authorized(Request.Builder().url(url.build()).get().build()).jsonObject
+    }
+
     suspend fun artistRanking(artistId: String): JsonObject {
         catalogueUuid(artistId)
         val result = authorized(Request.Builder().url("$apiBaseUrl/music/discovery/library-artists/$artistId/ranking").get().build()).jsonObject
@@ -336,11 +372,27 @@ class ServerFeatureRepository(
     override suspend fun catalogueTrackReference(contextId: String): CatalogueTrackReference {
         catalogueUuid(contextId)
         val root = musicPost("/music/discovery/contexts/$contextId/track-reference", buildJsonObject {})
-        return CatalogueTrackReference(catalogueUuid(root.requiredString("user_track_ref_id", UUID_TEXT_LENGTH)),
+        return decodeCatalogueReference(root)
+    }
+
+    internal suspend fun catalogDownloadFiles(operation: String, offset: Int): CatalogDevicePage {
+        catalogueUuid(operation)
+        val root = musicPost("/music/discovery/downloads/$operation/device-files?offset=$offset", buildJsonObject {})
+        val files = root.getValue("files").jsonArray.map { value ->
+            val file = value.jsonObject
+            decodeCatalogueReference(file) to catalogueUuid(file.requiredString("audio_variant_id", UUID_TEXT_LENGTH))
+        }
+        val unavailable = root.getValue("unavailable").jsonArray.size
+        val next = root.getValue("next_offset").jsonPrimitive.intOrNull
+        check(files.size + unavailable <= 50 && (next == null || next == offset + 50))
+        return CatalogDevicePage(files, unavailable, next)
+    }
+
+    private fun decodeCatalogueReference(root: JsonObject): CatalogueTrackReference =
+        CatalogueTrackReference(catalogueUuid(root.requiredString("user_track_ref_id", UUID_TEXT_LENGTH)),
             root.requiredLong("row_version"), root.optionalString("recording_id", UUID_TEXT_LENGTH)?.let(::catalogueUuid),
             root.requiredString("title", 2000), root.optionalString("artist", 2000), root.optionalString("album", 2000),
             root["duration_ms"]?.jsonPrimitive?.longOrNull, root.requiredString("resolution_status", 80))
-    }
 
     override suspend fun createMusicCatalogueContext(selection: MusicCatalogueContextRequest): MusicCatalogueContext {
         val request = Request.Builder().url("$apiBaseUrl/music/discovery/contexts")

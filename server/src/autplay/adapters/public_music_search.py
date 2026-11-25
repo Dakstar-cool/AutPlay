@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 from autplay.adapters.public_track_metadata import _credit_members
+from autplay.domain.artist_credits import recording_credit
 from autplay.domain.music_discovery import (
     MAX_BROWSE_OFFSET,
     MAX_RELEASE_TRACKS,
@@ -68,6 +69,9 @@ def _credit(value: object) -> str | None:
         return None
     if not isinstance(value, list) or len(value) > 100:
         raise ValueError("invalid credit")
+    confirmed = recording_credit(_credit_members(value))
+    if confirmed:
+        return _text(confirmed.preferred)
     parts: list[str] = []
     for item in value:
         if not isinstance(item, dict):
@@ -183,31 +187,53 @@ class MusicBrainzDiscoveryProvider:
             rows = _rows(document.get("releases"), limit)
             count = _count(document.get("release-count"))
             _source_progress(document, "release-offset", offset, count, len(rows))
-            items = []
-            for row in rows:
-                if str(row.get("status", "")).lower() != "official":
-                    continue
-                identity = UUID(row["id"])
-                group = row.get("release-group") or {}
-                items.append(
-                    MusicDiscoveryCard(
-                        MusicDiscoveryEntity.RELEASE,
-                        identity,
-                        _title(row.get("title")),
-                        artist=_credit(row.get("artist-credit")),
-                        release_id=identity,
-                        release_date=_partial_date(row.get("date")),
-                        country=_text(row.get("country")),
-                        disambiguation=_text(row.get("disambiguation")),
-                        release_group_id=UUID(group["id"]) if group.get("id") else None,
-                        release_type=_text(group.get("primary-type")),
-                    )
-                )
-            return MusicDiscoveryPage(
-                _deduplicate(items), limit, offset, count, len(rows), max_offset=MAX_BROWSE_OFFSET
-            )
+            return self._release_page(rows, limit, offset, count)
         except (ValueError, TypeError, KeyError, AttributeError) as error:
             raise MetadataProviderError("metadata_response_invalid", retryable=False) from error
+
+    def recent_artist_releases(
+        self, artist_id: UUID, start: date, end: date, *, limit: int, offset: int
+    ) -> MusicDiscoveryPage:
+        discovery_page_bounds(limit, offset, MAX_BROWSE_OFFSET)
+        lower = start.isoformat() if start != date.min else "*"
+        query = f"arid:{artist_id} AND status:official AND date:[{lower} TO {end}]"
+        params = urlencode({"query": query, "limit": limit, "offset": offset, "fmt": "json"})
+        try:
+            document = self.http.json(_BASE + "release?" + params)
+            rows = _rows(document["releases"], limit)
+            count = _count(document["count"])
+            _source_progress(document, "offset", offset, count, len(rows))
+            return self._release_page(rows, limit, offset, count)
+        except (ValueError, TypeError, KeyError, AttributeError) as error:
+            raise MetadataProviderError("metadata_response_invalid", retryable=False) from error
+
+    @staticmethod
+    def _release_page(
+        rows: list[dict[str, Any]], limit: int, offset: int, count: int
+    ) -> MusicDiscoveryPage:
+        items = []
+        for row in rows:
+            if str(row.get("status", "")).lower() != "official":
+                continue
+            identity = UUID(row["id"])
+            group = row.get("release-group") or {}
+            items.append(
+                MusicDiscoveryCard(
+                    MusicDiscoveryEntity.RELEASE,
+                    identity,
+                    _title(row.get("title")),
+                    artist=_credit(row.get("artist-credit")),
+                    release_id=identity,
+                    release_date=_partial_date(row.get("date")),
+                    country=_text(row.get("country")),
+                    disambiguation=_text(row.get("disambiguation")),
+                    release_group_id=UUID(group["id"]) if group.get("id") else None,
+                    release_type=_text(group.get("primary-type")),
+                )
+            )
+        return MusicDiscoveryPage(
+            _deduplicate(items), limit, offset, count, len(rows), max_offset=MAX_BROWSE_OFFSET
+        )
 
     def artist_tracks(self, artist_id: UUID, *, limit: int, offset: int) -> MusicDiscoveryPage:
         discovery_page_bounds(limit, offset, MAX_BROWSE_OFFSET)
@@ -218,7 +244,7 @@ class MusicBrainzDiscoveryProvider:
                     "artist": str(artist_id),
                     "limit": limit,
                     "offset": offset,
-                    "inc": "artist-credits",
+                    "inc": "artist-credits work-rels",
                     "fmt": "json",
                 }
             )
@@ -230,6 +256,9 @@ class MusicBrainzDiscoveryProvider:
             _source_progress(document, "recording-offset", offset, count, len(rows))
             items: list[MusicDiscoveryCard] = []
             for row in rows:
+                members = _credit_members(row.get("artist-credit"))
+                if members and not any(member["mbid"] == str(artist_id) for member in members):
+                    continue
                 identity = UUID(row["id"])
                 items.append(
                     MusicDiscoveryCard(
@@ -238,9 +267,22 @@ class MusicBrainzDiscoveryProvider:
                         _title(row.get("title")),
                         artist=_credit(row.get("artist-credit")),
                         recording_id=identity,
+                        performance_types=tuple(
+                            sorted(
+                                {
+                                    attr
+                                    for relation in _rows(row.get("relations", []), 1000)
+                                    if relation.get("target-type") == "work"
+                                    and relation.get("type") == "performance"
+                                    for attr in relation.get("attributes", [])
+                                    if attr in ("cover", "live")
+                                }
+                            )
+                        ),
+                        artist_members=members,
                         guest_artist_ids=tuple(
                             UUID(member["mbid"])
-                            for member in _credit_members(row.get("artist-credit"))
+                            for member in members
                             if member["role"] == "FEATURED"
                         ),
                         duration_ms=_duration(row.get("length")),

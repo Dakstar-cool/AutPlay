@@ -2,7 +2,6 @@ package app.autplay.ui
 
 import app.autplay.ui.AutPlayDialog
 
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -23,9 +22,6 @@ import app.autplay.R
 import app.autplay.application.library.CoreTrackDetail
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.work.TrackMetadataWork
-import java.io.File
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
 @Composable
@@ -43,21 +39,14 @@ internal fun rememberTrackArtworkBitmap(trackId: String?): android.graphics.Bitm
     val activeSettings = settings ?: return null
     val profile = activeSettings.activeServerProfileId?.value ?: "legacy-unscoped"
     val database = remember(context) { AutPlayRuntime.database(context) }
-    val art by key(database, profile, trackId) {
-        remember { database.trackMetadataDao().observeArtwork(profile, trackId) }.collectAsState(initial = null)
+    val source by key(database, profile, trackId) {
+        remember { database.trackMetadataDao().coverSource(profile, trackId) }.collectAsState(initial = null)
     }
-    val path = art?.filePath ?: return null
-    return key(context, profile, trackId, path) {
-        produceState<android.graphics.Bitmap?>(initialValue = null) {
-            value = withContext(Dispatchers.IO) {
-                val file = File(path)
-                val root = File(context.filesDir, "metadata-art").canonicalPath + File.separator
-                if (file.canonicalPath.startsWith(root) && file.isFile && file.length() <= 2_097_152) {
-                    BitmapFactory.decodeFile(path)
-                } else null
-            }
-        }.value
-    }
+    val photo = source ?: return null
+    val sha = photo.sha ?: return rememberCatalogBitmap(photo.releaseMbid)
+    val binding = if (activeSettings.activeUserId != null && activeSettings.deviceId != null && activeSettings.activeServerProfileId != null)
+        app.autplay.application.sync.ClientEventBinding(activeSettings.activeUserId, activeSettings.deviceId, activeSettings.activeServerProfileId) else null
+    return rememberMetadataBitmap(profile, sha, photo.ref, binding, photo.path)
 }
 
 @Composable
@@ -75,6 +64,7 @@ internal fun TrackMetadataPanel(detail: CoreTrackDetail) {
     LaunchedEffect(saveState) { if (saveState == WorkInfo.State.SUCCEEDED) { editing = false; saveWorkId = null } }
     val labels = linkedMapOf("title" to R.string.metadata_title_field, "artist" to R.string.metadata_artist,
         "album" to R.string.detail_album, "album_artist" to R.string.metadata_album_artist,
+        "composer" to R.string.metadata_composer,
         "release_date" to R.string.metadata_release_date, "original_release_date" to R.string.metadata_first_release,
         "recording_date" to R.string.metadata_recording_date, "label" to R.string.metadata_label,
         "track_number" to R.string.metadata_track_number, "disc_number" to R.string.metadata_disc_number)
@@ -89,7 +79,7 @@ internal fun TrackMetadataPanel(detail: CoreTrackDetail) {
         labels.filterKeys { it !in setOf("title", "artist", "album") }.forEach { (key, label) ->
             metadata?.text(key)?.let { value ->
                 val source = (metadata.provenance[key] as? JsonObject)?.get("source")?.jsonPrimitive?.content
-                val sourceLabel = when (source) { "USER" -> stringResource(R.string.metadata_manual); "EMBEDDED" -> stringResource(R.string.metadata_from_file); else -> "MusicBrainz" }
+                val sourceLabel = when (source) { "USER" -> stringResource(R.string.metadata_manual); "EMBEDDED", "FILENAME" -> stringResource(R.string.metadata_from_file); "SOURCE_LABEL" -> stringResource(R.string.metadata_from_source_label); "MUSICBRAINZ" -> "MusicBrainz"; else -> source.orEmpty() }
                 Text("${stringResource(label)}: $value · $sourceLabel", style = MaterialTheme.typography.bodyMedium)
             }
         }

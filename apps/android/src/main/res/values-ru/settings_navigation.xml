@@ -10,7 +10,6 @@
     <string name="settings_music_summary">Файлы, папки и загрузка треков</string>
     <string name="settings_appearance_summary">%1$s · %2$s</string>
     <string name="settings_data_summary">Статистика и рекомендации</string>
-    <string name="settings_room_downloads">Подготовка треков для «Моей волны» и совместного прослушивания</string>
     <string name="settings_transfer_scope">Здесь переносятся параметры приложения. Файл восстановления аккаунта сохраните отдельно в разделе «Аккаунт и устройства».</string>
     <string name="settings_diagnostics_summary">Технические сведения и доступ разработчика</string>
     <string name="admission_account_conflict">Администратор одобрил другой аккаунт. Ваш аккаунт на телефоне сохранён. Отмените заявку, затем подключите свой аккаунт с паролем или выйдите из него, чтобы использовать аккаунт сервера.</string>

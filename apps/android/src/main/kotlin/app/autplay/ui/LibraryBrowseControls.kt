@@ -31,7 +31,7 @@ internal fun LibraryBrowseControls(
     onDownloads: () -> Unit,
     onAdd: () -> Unit,
 ) {
-    val sections = listOf(LibrarySection.Tracks, LibrarySection.Artists, LibrarySection.Albums, LibrarySection.Playlists, LibrarySection.Review)
+    val sections = listOf(LibrarySection.Tracks, LibrarySection.Artists, LibrarySection.Albums, LibrarySection.Playlists)
     LazyRow(
         Modifier.fillMaxWidth().testTag("library-sections"),
         contentPadding = PaddingValues(horizontal = AutPlayTokens.dimensions.screenPadding),
@@ -43,17 +43,24 @@ internal fun LibraryBrowseControls(
                 Modifier.testTag("library-tab-$section").semantics { selected = active })
         }
     }
+    val favorites = state.section == LibrarySection.Tracks && state.filter == LibraryFilter.Loved
+    val onDevice = state.section == LibrarySection.Tracks && state.filter == LibraryFilter.OnDevice
+    Row(Modifier.fillMaxWidth().padding(horizontal = AutPlayTokens.dimensions.screenPadding),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        QuickLibraryAction(stringResource(R.string.library_favorites_shortcut), AutPlayIcon.Favorite, true, favorites,
+            Modifier.weight(1f).testTag("library-favorites").semantics { selected = favorites }) {
+            onSectionChange(LibrarySection.Tracks)
+            onFilterChange(if (favorites) LibraryFilter.All else LibraryFilter.Loved)
+        }
+        QuickLibraryAction(stringResource(R.string.library_on_device), AutPlayIcon.Devices, true, onDevice,
+            Modifier.weight(1f).testTag("library-device").semantics { selected = onDevice }) {
+            onSectionChange(LibrarySection.Tracks)
+            onFilterChange(if (onDevice) LibraryFilter.All else LibraryFilter.OnDevice)
+        }
+    }
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = AutPlayTokens.dimensions.screenPadding, vertical = 4.dp)) {
         val showIcons = maxWidth >= 340.dp && LocalDensity.current.fontScale <= 1.3f
-        val favorites = state.section == LibrarySection.Tracks && state.filter == LibraryFilter.Loved
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            QuickLibraryAction(
-                stringResource(R.string.library_favorites_shortcut), AutPlayIcon.Favorite, showIcons, favorites,
-                Modifier.weight(1f).testTag("library-favorites").semantics { selected = favorites },
-            ) {
-                onSectionChange(LibrarySection.Tracks)
-                onFilterChange(if (favorites) LibraryFilter.All else LibraryFilter.Loved)
-            }
             QuickLibraryAction(stringResource(R.string.nav_downloads), AutPlayIcon.Download, showIcons, false,
                 Modifier.weight(1f).testTag("library-downloads"), onDownloads)
             if (state.section == LibrarySection.Tracks) {
