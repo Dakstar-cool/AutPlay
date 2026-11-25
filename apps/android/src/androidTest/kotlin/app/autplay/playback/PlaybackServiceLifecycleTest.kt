@@ -54,6 +54,11 @@ import org.junit.runner.RunWith
 @UnstableApi
 @RunWith(AndroidJUnit4::class)
 class PlaybackServiceLifecycleTest {
+    private val MediaController.feedbackButtons
+        get() = mediaButtonPreferences.filter { button ->
+            button.sessionCommand?.customAction in setOf(PlaybackNotification.ACTION_LIKE, PlaybackNotification.ACTION_DISLIKE)
+        }
+
     @Test fun wavePauseCancelsScheduledStartAndAllowsANewExplicitStart() = runBlocking {
         val fixture = Fixture()
         try {
@@ -153,7 +158,7 @@ class PlaybackServiceLifecycleTest {
             fixture.database.libraryDao().upsertPreference(app.autplay.data.local.entity.UserTrackPreferenceEntity(
                 fixture.tracks[0], "NEUTRAL", null, true, "LOCAL_ONLY", 0, 1,
             ))
-            fixture.await { fixture.main { fixture.controller?.mediaButtonPreferences?.count { it.isEnabled } == 2 } }
+            fixture.await { fixture.main { fixture.controller?.feedbackButtons?.count { it.isEnabled } == 2 } }
             assertNotNull(fixture.main { fixture.controller?.sessionActivity })
             val firstEntry = fixture.entries[0].value
             suspend fun rate(action: String, expected: String = firstEntry): Int {
@@ -170,7 +175,10 @@ class PlaybackServiceLifecycleTest {
             assertEquals(firstEntry, fixture.main { fixture.controller?.currentMediaItem?.mediaId })
             assertFalse(fixture.main { fixture.controller?.isPlaying == true })
             fixture.await { fixture.main {
-                fixture.controller?.mediaButtonPreferences?.any { it.icon == androidx.media3.session.CommandButton.ICON_THUMB_UP_FILLED } == true
+                fixture.controller?.feedbackButtons?.any { button ->
+                    button.sessionCommand?.customAction == PlaybackNotification.ACTION_LIKE &&
+                        button.icon == androidx.media3.session.CommandButton.ICON_HEART_FILLED
+                } == true
             } }
             assertEquals(SessionResult.RESULT_SUCCESS, rate(PlaybackNotification.ACTION_LIKE))
             assertEquals("NEUTRAL", fixture.database.libraryDao().preference(fixture.tracks[0])?.preference)
@@ -207,7 +215,7 @@ class PlaybackServiceLifecycleTest {
             fixture.await { fixture.main { fixture.controller?.currentMediaItem?.mediaId == first.value &&
                 fixture.controller?.getMediaItemAt(1)?.mediaId == duplicate.value } }
             fixture.owner.dispatch(PlaybackCommand.Next)
-            fixture.await { fixture.main { fixture.controller?.mediaButtonPreferences?.let { buttons -> buttons.size == 2 && buttons.all {
+            fixture.await { fixture.main { fixture.controller?.feedbackButtons?.let { buttons -> buttons.size == 2 && buttons.all {
                 it.sessionCommand?.customExtras?.getString(PlaybackNotification.EXTRA_QUEUE_ENTRY_ID) == duplicate.value && it.isEnabled
             } } == true } }
         } finally { fixture.close() }
@@ -220,7 +228,9 @@ class PlaybackServiceLifecycleTest {
             fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
             fixture.main { fixture.controller?.pause() }
             fixture.switchProfile()
-            fixture.await { fixture.main { fixture.controller?.mediaButtonPreferences?.none { it.isEnabled } == true } }
+            fixture.await { fixture.main {
+                fixture.controller?.feedbackButtons?.let { buttons -> buttons.size == 2 && buttons.none { it.isEnabled } } == true
+            } }
             val future = fixture.main {
                 checkNotNull(fixture.controller).sendCustomCommand(SessionCommand(PlaybackNotification.ACTION_DISLIKE, Bundle.EMPTY),
                     Bundle().apply { putString(PlaybackNotification.EXTRA_QUEUE_ENTRY_ID, fixture.entries[0].value) })

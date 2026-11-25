@@ -677,13 +677,17 @@ class PlaybackPlayerSurfacesTest {
         composeRule.runOnIdle {
             assertEquals(1, shuffleCalls)
             assertEquals(1, repeatCalls)
-            state.value = state.value.copy(shuffleModeEnabled = true, repeatMode = RepeatModePresentation.One)
+            state.value = state.value.copy(shuffleModeEnabled = true, repeatMode = RepeatModePresentation.One, repeatOnce = true)
         }
         shuffle.assertIsSelected().assert(SemanticsMatcher.expectValue(
             SemanticsProperties.StateDescription, context.getString(R.string.player_surface_shuffle_on)))
         repeat.assertIsSelected().assert(SemanticsMatcher.expectValue(
-            SemanticsProperties.StateDescription, context.getString(R.string.player_repeat_one)))
+            SemanticsProperties.StateDescription, context.getString(R.string.player_repeat_once)))
         composeRule.onNodeWithText("1").assertIsDisplayed()
+        composeRule.runOnIdle { state.value = state.value.copy(repeatOnce = false) }
+        repeat.assertIsSelected().assert(SemanticsMatcher.expectValue(
+            SemanticsProperties.StateDescription, context.getString(R.string.player_repeat_one)))
+        composeRule.onNodeWithText("1").assertDoesNotExist()
         composeRule.runOnIdle { state.value = state.value.copy(repeatMode = RepeatModePresentation.All) }
         repeat.assertIsSelected().assert(SemanticsMatcher.expectValue(
             SemanticsProperties.StateDescription, context.getString(R.string.player_repeat_all)))
