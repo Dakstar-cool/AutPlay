@@ -342,7 +342,7 @@ class PlaylistVaultHandler:
                     """),
                         {"ref": ref, "recording": recording},
                     )
-                elif member:
+                elif current_member:
                     # Keep the original share evidence. An independently acquired public edition
                     # can back an unresolved portable handle without granting access to
                     # private audio.

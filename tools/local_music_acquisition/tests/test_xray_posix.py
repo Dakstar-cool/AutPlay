@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -16,7 +17,7 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX server si
 
 
 @pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
-def test_real_cli_signal_waits_for_download_and_reaps_xray(tmp_path, signum):
+def test_real_cli_signal_waits_for_download_and_reaps_xray(tmp_path, signum, audio):
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
@@ -35,6 +36,9 @@ def test_real_cli_signal_waits_for_download_and_reaps_xray(tmp_path, signum):
     config.write_text("{}")
     playlist = tmp_path / "playlist.txt"
     playlist.write_text("Artist - One\nArtist - Two\n")
+    sample = tmp_path / "sample.wav"
+    sample.write_bytes(audio)
+    ref = "sha256:" + hashlib.sha256(audio).hexdigest()[:12]
     script = (
         "import sys,time\nfrom pathlib import Path\n"
         "from local_music_acquisition import cli\n"
@@ -43,7 +47,8 @@ def test_real_cli_signal_waits_for_download_and_reaps_xray(tmp_path, signum):
         "def acquire(self,item,output,*,proxy_url):\n"
         f" Path({str(active)!r}).write_text('active')\n"
         " time.sleep(0.5)\n"
-        " return AcquiredArtifact(self.name,'sha256:0123456789ab')\n"
+        f" (output / (item.title + '.wav')).write_bytes(Path({str(sample)!r}).read_bytes())\n"
+        f" return AcquiredArtifact(self.name,{ref!r})\n"
         "SoundCloudProvider._acquire=acquire\n"
         "sys.exit(cli.main(sys.argv[1:]))\n"
     )
