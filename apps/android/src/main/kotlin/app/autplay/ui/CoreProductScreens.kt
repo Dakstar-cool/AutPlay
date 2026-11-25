@@ -881,7 +881,7 @@ private fun LazyGridScope.collectionItems(
     }
     gridItems(collections, key = { "$keyPrefix${it.id}" }) { collection ->
         val count = collection.itemCount?.let { pluralStringResource(R.plurals.ui_library_refresh_collection_track_count, it, it) }
-        val subtitle = listOfNotNull(collection.subtitle?.takeIf { it.isNotBlank() }, count).joinToString(" В· ")
+        val subtitle = listOfNotNull(collection.subtitle?.takeIf { it.isNotBlank() }, count).joinToString(" · ")
         CollectionCoverTile(collection.title, collection.artworkTrackId, subtitle, Modifier.testTag("$keyPrefix${collection.id}"), catalogCoverId = collection.releaseMbid) {
             onOpenCollection(section, collection.id)
         }

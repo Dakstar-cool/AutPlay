@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -29,7 +30,7 @@ from autplay.adapters.postgresql.vault_uow import (
     SqlAlchemyVaultUnitOfWorkFactory,
     TransactionalIngestRepository,
 )
-from autplay.adapters.public_track_metadata import MusicBrainzMetadataProvider
+from autplay.adapters.public_track_metadata import MusicBrainzMetadataProvider, PublicMetadataHttp
 from autplay.application.internet_acquisition import InternetAcquisitionTarget
 from autplay.application.internet_music import INTERNET_ACQUIRE_JOB, InternetMusicService
 from autplay.application.job_worker import JobExecutionContext, JobLeaseLost
@@ -167,6 +168,10 @@ class Work:
 
 class Provider(MusicBrainzMetadataProvider):
     def __init__(self, candidate: MetadataCandidate | None = None) -> None:
+        http = Mock(spec_set=PublicMetadataHttp)
+        http.json.return_value = {}
+        http.get.return_value = None
+        super().__init__(http)
         self.candidate = candidate
         self.query: MetadataQuery | None = None
         self.cover_error: MetadataProviderError | None = None
