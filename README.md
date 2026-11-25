@@ -49,11 +49,11 @@ Android-клиент написан на Kotlin с Jetpack Compose и Media3. Ma
 
 [Архитектура][architecture] · [Контракты API][contracts] · [CI и выпуск][ci] · [Сообщить об ошибке][issues]
 
-[apk]: https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.14/autplay-1.0.14-production.apk
-[dmg]: https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.14/autplay-1.0.14-macos-arm64.dmg
-[release]: https://github.com/Dakstar-cool/AutPlay/releases/tag/v1.0.14
-[guide]: docs/operations/GET_STARTED_1.0.14.md
-[account-guide]: docs/operations/GET_STARTED_1.0.14.md#account
+[apk]: https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.15/autplay-1.0.15-production.apk
+[dmg]: https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.15/autplay-1.0.15-macos-arm64.dmg
+[release]: https://github.com/Dakstar-cool/AutPlay/releases/tag/v1.0.15
+[guide]: docs/operations/GET_STARTED_1.0.15.md
+[account-guide]: docs/operations/GET_STARTED_1.0.15.md#account
 [rooms-guide]: docs/development/WAVE_ROOMS.md
 [sona]: https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.14/autplay-server-v1.0.14.docker.tar.gz
 [deployment]: docs/operations/DEPLOYMENT.md
