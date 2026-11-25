@@ -10,7 +10,6 @@
     <string name="settings_music_summary">Files, folders and track downloads</string>
     <string name="settings_appearance_summary">%1$s · %2$s</string>
     <string name="settings_data_summary">Listening stats and recommendations</string>
-    <string name="settings_room_downloads">Prepare tracks for My Wave and shared listening</string>
     <string name="settings_transfer_scope">This transfers app preferences. Save your account recovery file separately in Account and devices.</string>
     <string name="settings_diagnostics_summary">Technical details and developer access</string>
     <string name="admission_account_conflict">The administrator approved a different account. Your account on this phone has been preserved. Cancel this request, then connect your account with its password or sign out before using the server account.</string>

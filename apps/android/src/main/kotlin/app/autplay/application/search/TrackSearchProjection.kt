@@ -1,6 +1,7 @@
 package app.autplay.application.search
 
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import androidx.room3.withWriteTransaction
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.TrackSearchContentEntity
@@ -44,7 +45,7 @@ internal suspend fun AutPlayDatabase.refreshFilenameIndex(profile: String, check
             }
         }
         cursor = ids.lastOrNull() ?: "complete"
-        checkpoints.edit().putString(key, cursor).apply()
+        checkpoints.edit { putString(key, cursor) }
         kotlinx.coroutines.yield()
     }
 }

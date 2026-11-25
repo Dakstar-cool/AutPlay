@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
@@ -59,7 +60,7 @@ internal class ArtistPageCache {
     val pages = object : LinkedHashMap<ArtistKey, CachedArtistPage>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ArtistKey, CachedArtistPage>?): Boolean = size > 8
     }
-    var revision by mutableStateOf(0L)
+    var revision by mutableLongStateOf(0L)
         private set
 
     fun invalidate() { revision++ }

@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKeyConstraint,
     Index,
@@ -17,7 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import BYTEA, TIMESTAMP
+from sqlalchemy.dialects.postgresql import BYTEA, JSONB, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -920,6 +922,83 @@ Index(
 )
 
 
+class PreservationCaseRow(Base):
+    __tablename__ = "preservation_case"
+
+    owner: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True))
+    event: Mapped[str] = mapped_column(Text)
+    document: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    discovered_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    __table_args__ = (
+        PrimaryKeyConstraint("owner", "event", name="preservation_case_pkey"),
+        ForeignKeyConstraint(
+            ["owner"],
+            ["account.user_account.user_id"],
+            name="preservation_case_owner_fkey",
+            ondelete="CASCADE",
+        ),
+        {"schema": "discovery"},
+    )
+
+
+class PreservationRunRow(Base):
+    __tablename__ = "preservation_run"
+
+    owner: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True))
+    run_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True))
+    requested_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    sources: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    __table_args__ = (
+        PrimaryKeyConstraint("owner", "run_id", name="preservation_run_pkey"),
+        ForeignKeyConstraint(
+            ["owner"],
+            ["account.user_account.user_id"],
+            name="preservation_run_owner_fkey",
+            ondelete="CASCADE",
+        ),
+        Index(
+            "preservation_pending",
+            "owner",
+            unique=True,
+            postgresql_where=text("finished_at IS NULL"),
+        ),
+        {"schema": "discovery"},
+    )
+
+
+class PreservationCheckRow(Base):
+    __tablename__ = "preservation_check"
+
+    owner: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True))
+    run_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True))
+    event: Mapped[str] = mapped_column(Text)
+    document: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    is_new: Mapped[bool] = mapped_column(Boolean)
+    outcome: Mapped[str] = mapped_column(Text)
+    job_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    __table_args__ = (
+        PrimaryKeyConstraint("owner", "run_id", "event", name="preservation_check_pkey"),
+        ForeignKeyConstraint(
+            ["owner", "run_id"],
+            ["discovery.preservation_run.owner", "discovery.preservation_run.run_id"],
+            name="preservation_check_owner_run_id_fkey",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["owner", "event"],
+            ["discovery.preservation_case.owner", "discovery.preservation_case.event"],
+            name="preservation_check_owner_event_fkey",
+            ondelete="CASCADE",
+        ),
+        {"schema": "discovery"},
+    )
+
+
 __all__ = (
     "AcquisitionAttemptRow",
     "ArtistPolicyRevisionRow",
@@ -931,5 +1010,8 @@ __all__ = (
     "DiscoveryRunCandidateRow",
     "DiscoveryRunPageRow",
     "DiscoveryRunRow",
+    "PreservationCaseRow",
+    "PreservationCheckRow",
+    "PreservationRunRow",
     "SourceAuthorizationRow",
 )

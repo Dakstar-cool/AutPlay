@@ -70,7 +70,7 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 187
+    assert _object_count(database_harness, empty_database_name) == 190
 
     database_harness.downgrade(empty_database_name, "base")
     assert _current_revision(database_harness, empty_database_name) is None
@@ -78,7 +78,7 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 187
+    assert _object_count(database_harness, empty_database_name) == 190
 
 
 def test_sona_upgrade_imports_legacy_window_and_preserves_operator_stop(

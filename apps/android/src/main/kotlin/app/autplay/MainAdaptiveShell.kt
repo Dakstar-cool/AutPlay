@@ -84,6 +84,7 @@ internal data class MainAdaptiveShellActions(
     val dismissMiniPlayer: () -> Unit,
 )
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 internal fun MainAdaptiveShell(
     state: MainAdaptiveShellState,

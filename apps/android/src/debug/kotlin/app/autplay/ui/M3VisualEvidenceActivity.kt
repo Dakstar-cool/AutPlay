@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -105,7 +106,7 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                 mutableStateOf(if (screen == "player-dragging") 140_000L else null)
             }
             var fixtureShuffle by remember { mutableStateOf(false) }
-            var repeatPresses by remember { mutableStateOf(0) }
+            var repeatPresses by remember { mutableIntStateOf(0) }
             AutPlayTheme(
                 AutPlayAppearance(if (dark) AutPlayThemeMode.Dark else AutPlayThemeMode.Light),
             ) {

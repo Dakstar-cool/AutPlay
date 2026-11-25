@@ -111,7 +111,8 @@ internal fun ImportPlaylistAction() {
         }) { Text(stringResource(R.string.playlist_preview)) } },
         dismissButton = { TextButton(onClick = { opening = false }) { Text(stringResource(android.R.string.cancel)) } },
     )
-    LaunchedEffect(uri) {
+    val fallbackName = stringResource(R.string.playlist_import_file)
+    LaunchedEffect(uri, fallbackName) {
         val selected = uri?.let(Uri::parse) ?: return@LaunchedEffect
         try {
             snapshot = withContext(Dispatchers.IO) {
@@ -133,7 +134,7 @@ internal fun ImportPlaylistAction() {
                     }
                     val name = context.contentResolver.query(selected, arrayOf(OpenableColumns.DISPLAY_NAME),
                         null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-                    PlaylistImportFile.decode(output.toByteArray(), name ?: context.getString(R.string.playlist_import_file))
+                    PlaylistImportFile.decode(output.toByteArray(), name ?: fallbackName)
                 }
             }
         } catch (cancelled: CancellationException) { throw cancelled }

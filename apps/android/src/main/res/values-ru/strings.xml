@@ -29,16 +29,11 @@
     <string name="onboarding_password_invalid">Используйте 7–128 символов, включая хотя бы один спецсимвол, например !, @ или _. Пробел не считается. Избегайте распространённых паролей и повторения одного символа.</string>
     <string name="onboarding_password_mismatch">Пароли не совпадают. Введите одинаковую фразу в обоих полях.</string>
     <string name="onboarding_saving">Завершаем настройку на этом телефоне…</string>
-    <string name="home_first_track_body">Выберите аудиофайл на телефоне и начните слушать. Ваша музыка работает без сети.</string>
     <string name="local_audio_picker_hint">В окне выбора файла откройте меню и выберите «Скачанные» или другую папку.</string>
     <string name="library_play_track">Воспроизвести %1$s</string>
 
     <string name="home_my_wave">Моя волна</string>
-    <string name="home_hero_personal_flow">Ваш персональный поток</string>
     <string name="home_hero_open_player">Открыть полный плеер</string>
-    <string name="home_hero_playing">Сейчас играет</string>
-    <string name="home_hero_ready">Готово к воспроизведению</string>
-    <string name="home_hero_control_locked">Управление недоступно для текущего режима воспроизведения</string>
     <string name="home_context_collections">Подборки под момент</string>
     <string name="home_context_energy">Энергичное</string>
     <string name="home_context_running">Для бега</string>
@@ -46,12 +41,10 @@
     <string name="home_context_evening">Вечер</string>
     <string name="home_loading">Загружаем локальную Главную</string>
     <string name="home_offline_fallback">Офлайн-рекомендации показывают только музыку, доступную на этом устройстве.</string>
-    <string name="home_recently_played">Недавно прослушано</string>
     <string name="home_recently_added">Недавно добавлено</string>
     <string name="home_playlists">Плейлисты</string>
     <string name="home_offline_ready">Доступно офлайн</string>
     <string name="home_offline_open">Открыть офлайн-музыку</string>
-    <string name="home_problems">Требует внимания</string>
     <string name="home_problems_open">Проверить</string>
     <plurals name="home_problem_total_count">
         <item quantity="one">%d объект требует внимания</item>
@@ -484,10 +477,6 @@
     <string name="settings_folder_privacy">Папка используется для обновления медиатеки. Поиск музыки на телефоне запрашивает отдельный доступ к аудиофайлам. Разрешения можно отозвать в настройках Android.</string>
     <string name="settings_metered_downloads">Скачивать треки через мобильный интернет</string>
     <string name="settings_smooth_track_transitions">Предзагрузка следующего трека</string>
-    <string name="settings_wave_prefetch_off">Не подготавливать треки заранее</string>
-    <string name="settings_wave_prefetch_next">Подготовить следующий трек</string>
-    <string name="settings_wave_prefetch_three">Подготовить три следующих трека</string>
-    <string name="settings_wave_prefetch_wifi">Подготавливать больше треков по Wi‑Fi</string>
     <string name="settings_transfer">Перенос настроек</string>
     <string name="settings_export">Сохранить настройки в файл</string>
     <string name="settings_import">Загрузить настройки из файла</string>
