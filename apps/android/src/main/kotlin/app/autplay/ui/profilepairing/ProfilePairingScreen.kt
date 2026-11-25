@@ -61,7 +61,7 @@ internal data class ProfilePairingUiState(
     val accountLabel: String? = null,
     val deviceLabel: String? = null,
     val pendingSyncCount: Int = 0,
-    val devices: List<String> = emptyList(),
+    val devices: List<app.autplay.application.profilepairing.DeviceSummary> = emptyList(),
     val sessions: List<String> = emptyList(),
     /** Runtime-owned trust gate; no enrollment bearer entry is rendered before trust confirmation. */
     val trustConfirmed: Boolean = false,
@@ -221,7 +221,12 @@ internal fun ProfilePairingScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (showHero) PersonalServerHero(state)
-        state.portableAccount?.let { PortableAccountCard(it, actions.portableAccount) }
+        state.portableAccount?.let { account ->
+            if (!account.bound || account.status.publicId != null) PortableAccountCard(account, actions.portableAccount)
+            else OutlinedButton(onClick = { pendingConfirmation = ProfileRemoteAction.LOGOUT_CURRENT }) {
+                Text(stringResource(R.string.account_sign_out))
+            }
+        }
         state.selfPairing?.let { SelfPairingCard(it, actions.selfPairing) }
         state.accountRecovery?.let { AccountRecoveryCard(it, actions.accountRecovery) }
         state.accountDeletion?.let { AccountDeletionCard(it, actions.accountDeletion) }
@@ -290,7 +295,7 @@ internal fun ProfilePairingScreen(
                     state.serverLabel?.let { Text(stringResource(R.string.profile_server_named, it)) }
                     TrustEvidence(pairing.snapshot)
                     state.accountLabel?.let { Text(stringResource(R.string.profile_account_named, it)) }
-                    state.deviceLabel?.let { Text(stringResource(R.string.profile_device_named, it)) }
+                    if (state.devices.none { it.current }) state.deviceLabel?.let { Text(stringResource(R.string.profile_device_named, it)) }
                     Text(stringResource(R.string.profile_confirm_before_exchange))
                     OutlinedButton(onClick = actions.cancelPairing) {
                         Text(stringResource(R.string.profile_cancel))
@@ -339,6 +344,7 @@ internal fun ProfilePairingScreen(
             }
         }
         state.publicAccountRegistration?.takeIf { state.pairing is PairingState.NotConnected &&
+            state.portableAccount?.status?.publicId == null &&
             !selfPairingBlocksFirstBind(state.selfPairing) && !accountRecoveryBlocksFirstBind(state.accountRecovery) &&
             !accountDeletionBlocksFirstBind(state.accountDeletion) }?.let { registration ->
             PublicAccountRegistrationPanel(
@@ -410,12 +416,9 @@ internal fun requiresSecureProfileWindow(
     hasTypedPublicInvitation: Boolean = false,
 ): Boolean =
     (state.pairing is PairingState.AwaitingTrust && state.trustConfirmed) ||
-        state.accountDeletion?.let { it.canManage || it.cancellation.canRecover ||
-            it.source != app.autplay.application.accountrecovery.AccountDeletionSourceState.Idle ||
-            it.cancellation.recipient != app.autplay.application.accountrecovery.AccountRecoveryRecipientState.Idle } == true ||
-        state.accountRecovery?.let { it.canManage || it.canRecover ||
-            it.source is app.autplay.application.accountrecovery.AccountRecoverySourceState.Ready ||
-            it.recipient != app.autplay.application.accountrecovery.AccountRecoveryRecipientState.Idle } == true ||
+        state.accountRecovery?.recipient?.let { it != app.autplay.application.accountrecovery.AccountRecoveryRecipientState.Idle } == true ||
+        accountDeletionBlocksFirstBind(state.accountDeletion) ||
+        state.accountDeletion?.cancellation?.recipient?.let { it != app.autplay.application.accountrecovery.AccountRecoveryRecipientState.Idle } == true ||
         state.pairing is PairingState.AwaitingConfirmation ||
         state.pairing is PairingState.ExchangingInvitation ||
         state.invitationManagement?.createdSecret != null ||
@@ -424,7 +427,7 @@ internal fun requiresSecureProfileWindow(
             it.source != app.autplay.application.selfpairing.SelfPairingSourceState.Idle ||
                 it.recipient != app.autplay.application.selfpairing.SelfPairingRecipientState.Idle
         } == true ||
-        state.admission != null || hasTypedPublicInvitation ||
+        state.admission?.admission is app.autplay.application.profilepairing.AdmissionState.AwaitingComparison || hasTypedPublicInvitation ||
         when (state.publicAccountRegistration) {
             is PublicAccountRegistrationState.Importing,
             is PublicAccountRegistrationState.CheckingDiscovery,
@@ -884,11 +887,38 @@ private fun ConnectedProfile(
     }
     if (state.devices.isNotEmpty()) {
         Text(stringResource(R.string.profile_connected_devices), style = MaterialTheme.typography.titleMedium)
-        state.devices.forEach { Text(it) }
+        var selectedDevice by remember(state.devices) { mutableStateOf<app.autplay.application.profilepairing.DeviceSummary?>(null) }
+        var otherDevicesExpanded by remember { mutableStateOf(false) }
+        state.devices.firstOrNull { it.current }?.let { Text(stringResource(R.string.device_this_phone, it.label)) }
+        val others = state.devices.filterNot { it.current }
+        if (others.isNotEmpty()) androidx.compose.material3.TextButton(onClick = { otherDevicesExpanded = !otherDevicesExpanded }) {
+            Text(stringResource(R.string.device_other_installations, others.size))
+        }
+        if (otherDevicesExpanded) others.forEach { device ->
+            val label = listOfNotNull(device.label, device.registered, device.deviceId.value.takeLast(6)).joinToString(" · ")
+            if (state.portableAccount?.status?.publicId == null) Text(label)
+            else Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text(label, Modifier.weight(1f))
+                androidx.compose.material3.TextButton(onClick = { selectedDevice = device },
+                    enabled = remoteActionPending == null) { Text(stringResource(R.string.device_disconnect)) }
+            }
+        }
+        selectedDevice?.let { device ->
+            app.autplay.ui.SecureAccountWindow(true)
+            ProfileActionConfirmation(ProfileRemoteAction.REVOKE_CURRENT_DEVICE, true, state.accountLabel,
+                listOfNotNull(device.label, device.registered).joinToString(" · "), { selectedDevice = null },
+                onConfirm = { login, password -> actions.portableAccount.revokeOtherDevice(device.deviceId, login, password).also { if (it) selectedDevice = null } },
+                otherDevice = true)
+        }
     }
     if (state.sessions.isNotEmpty()) {
-        Text(stringResource(R.string.profile_connected_sessions), style = MaterialTheme.typography.titleMedium)
-        state.sessions.forEach { Text(it) }
+        var showSessions by remember { mutableStateOf(false) }
+        androidx.compose.material3.TextButton(onClick = { showSessions = !showSessions }) {
+            Text(stringResource(R.string.device_session_count, stringResource(R.string.profile_connected_sessions), state.sessions.size))
+        }
+        if (showSessions) state.sessions.groupingBy { it }.eachCount().forEach { (name, count) ->
+            Text(stringResource(R.string.device_session_count, name, count))
+        }
     }
     Text(stringResource(R.string.profile_local_data_preserved))
     if (state.canReenrollTrustedDevice) {
@@ -918,6 +948,7 @@ private fun ProfileActionConfirmation(
     deviceLabel: String?,
     onDismiss: () -> Unit,
     onConfirm: suspend (String, CharArray) -> Boolean,
+    otherDevice: Boolean = false,
 ) {
     var login by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -926,10 +957,10 @@ private fun ProfileActionConfirmation(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     AutPlayDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text(stringResource(action.confirmTitleRes())) },
+        title = { Text(stringResource(if (otherDevice) R.string.device_disconnect else action.confirmTitleRes())) },
         text = {
             Column {
-                Text(stringResource(action.confirmBodyRes()))
+                Text(stringResource(if (otherDevice) R.string.device_disconnect_explanation else action.confirmBodyRes()))
                 accountLabel?.let { Text(stringResource(R.string.profile_account_named, it)) }
                 deviceLabel?.let { Text(stringResource(R.string.profile_device_named, it)) }
                 Text(stringResource(R.string.profile_local_data_preserved))

@@ -90,7 +90,7 @@ class LibraryVerticalSliceRepository(
         mutate(binding, changeId, "LIBRARY_ENTRY_UPSERTED", "LIBRARY_ENTRY", entryId, now, "{\"library_entry_local_id\":${q(entryId.value)},\"removed_at_ms\":null}") { sequence, bound ->
             val existing = database.libraryDao().entry(entryId.value) ?: missing()
             ensureOwned(binding, existing.serverProfileId)
-            database.libraryDao().upsertEntry(existing.copy(removedAtMs = null, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
+            database.libraryDao().upsertEntry(existing.copy(removedAtMs = null, personalSave = true, updatedAtMs = now, syncState = sync(bound), lastLocalSequence = sequence))
         }
 
     suspend fun setPreference(binding: ClientEventBinding?, trackRefId: LocalId, changeId: LocalId, preference: String, excluded: Boolean, attributionJson: String?, now: Long): SliceMutationResult =

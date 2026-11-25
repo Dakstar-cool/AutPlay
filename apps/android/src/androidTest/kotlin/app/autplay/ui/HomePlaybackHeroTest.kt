@@ -39,6 +39,7 @@ class HomePlaybackHeroTest {
 
     @Test
     fun activeHeroKeepsPlayerTransportArtworkAndLikeInteractiveAtCompactWidth() {
+        var artistOpens = 0
         var playerOpens = 0
         var toggles = 0
         var likedTrack: String? = null
@@ -56,6 +57,7 @@ class HomePlaybackHeroTest {
                         ),
                         localMode = true,
                         onOpenPlayer = { playerOpens += 1 },
+                        onOpenArtist = { artistOpens += 1 },
                         onPlayTrack = {},
                         onTogglePlayPause = { toggles += 1 },
                         onLike = { likedTrack = it },
@@ -65,6 +67,7 @@ class HomePlaybackHeroTest {
             }
         }
 
+        composeRule.onNodeWithTag("hero-open-artist").performClick()
         composeRule.onNodeWithTag("home-playback-hero").assertIsDisplayed()
         composeRule.onNodeWithTag("artwork-placeholder", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_pause))
@@ -77,6 +80,7 @@ class HomePlaybackHeroTest {
             .assertIsDisplayed().performClick()
 
         composeRule.runOnIdle {
+            assertEquals(1, artistOpens)
             assertEquals(1, toggles)
             assertEquals("track", likedTrack)
             assertEquals(1, playerOpens)

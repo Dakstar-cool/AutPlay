@@ -665,4 +665,11 @@
     <string name="detail_open_artist">Открыть исполнителя</string>
     <string name="detail_artist_info">Об исполнителе</string>
     <string name="detail_hide_artist_info">Скрыть сведения</string>
+    <string name="personal_library_search">Поиск в моей музыке</string>
+    <string name="personal_search_clear">Очистить</string>
+    <string name="device_this_phone">%1$s · этот телефон</string>
+    <string name="device_disconnect">Отключить устройство</string>
+    <string name="device_disconnect_explanation">Отозвать доступ у выбранной установки приложения?</string>
+    <string name="device_other_installations">Другие установки (%1$d)</string>
+    <string name="device_session_count">%1$s (%2$d)</string>
 </resources>

@@ -994,6 +994,18 @@ def test_nested_library_creation_reaches_incremental_pull_once(
         assert len(first["events"]) == 1
         assert first["events"][0]["aggregate_type"] == "USER_TRACK_REF"
         assert first["events"][0]["aggregate_server_id"] == str(ref_id)
+        negotiated = service.pull(
+            receiver,
+            {
+                **receiver_body,
+                "cursor": first["next_cursor"],
+                "limit": 1,
+                "capabilities": ["PERSONAL_LIBRARY_V1"],
+            },
+        )
+        assert negotiated["personal_library_version"] == 1
+        if occupied_by is None:
+            assert negotiated["events"][0]["payload"]["personal_save"] is True
         second = service.pull(
             receiver, {**receiver_body, "cursor": first["next_cursor"], "limit": 1}
         )

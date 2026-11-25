@@ -47,6 +47,7 @@ internal class OfflineCoreDetailState {
     var release: CoreReleaseDetail? by mutableStateOf(null)
     var playlist: CorePlaylistDetail? by mutableStateOf(null)
     var artist: ArtistDetail? by mutableStateOf(null)
+    var artistAlbums: List<app.autplay.application.library.CoreReleaseSummary> by mutableStateOf(emptyList())
     var artistAppearances: List<ArtistAppearance> by mutableStateOf(emptyList())
     var subjectArtistCredits: List<ArtistCredit> by mutableStateOf(emptyList())
     var loading: Boolean by mutableStateOf(false)
@@ -60,6 +61,7 @@ internal class OfflineCoreDetailState {
         release = null
         playlist = null
         artist = null
+        artistAlbums = emptyList()
         artistAppearances = emptyList()
         subjectArtistCredits = emptyList()
         error = false
@@ -106,16 +108,14 @@ internal class OfflineCoreDetailState {
                     val loadedPlaylist = repository.playlistDetail(target.stableId, profileId)
                     if (requestGuard.accepts(request)) playlist = loadedPlaylist
                 }
-                DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistAlbums -> {
-                    val activeProfile = profileId?.let(::ServerProfileId)
-                    val key = activeProfile?.let { ArtistKey(it, ArtistId(target.stableId)) }
-                    val loadedArtist = key?.let {
-                        artistCatalogPort.detail(it, MAX_ARTIST_CREDITS, MAX_ARTIST_CREDIT_MEMBERS)
-                    }
-                    val appearances = key?.let {
-                        artistCatalogPort.allAppearances(it)
-                    }.orEmpty()
+                DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistCollaborations, DetailKind.ArtistAlbums -> {
+                    val key = ArtistKey(app.autplay.application.artist.artistScope(profileId), ArtistId(target.stableId))
+                    val loadedArtist = artistCatalogPort.detail(key, MAX_ARTIST_CREDITS, MAX_ARTIST_CREDIT_MEMBERS)
+                    val appearances = artistCatalogPort.allAppearances(key)
+                    val trackIds = appearances.mapNotNull { (it.localTarget as? app.autplay.application.artist.ArtistLocalTarget.Track)?.localUserTrackRefId }.toSet()
+                    val albums = repository.artistReleases(profileId ?: "legacy-unscoped", trackIds)
                     if (requestGuard.accepts(request)) {
+                        artistAlbums = albums
                         artist = loadedArtist
                         artistAppearances = appearances
                     }
@@ -141,7 +141,7 @@ internal class OfflineCoreDetailState {
             DetailKind.Track -> track == null
             DetailKind.Release -> release == null
             DetailKind.Playlist -> playlist == null
-            DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistAlbums -> artist == null
+            DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistCollaborations, DetailKind.ArtistAlbums -> artist == null
         }
         if (error) reportError("DETAIL_UNAVAILABLE")
         loading = false
@@ -191,7 +191,7 @@ internal fun rememberOfflineCoreDetailState(
             repository.trackMetadataChanges(target.stableId, profileId).collectLatest {
                 state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
             }
-        } else if (target?.kind in setOf(DetailKind.Release, DetailKind.Playlist, DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistAlbums)) {
+        } else if (target?.kind in setOf(DetailKind.Release, DetailKind.Playlist, DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistCollaborations, DetailKind.ArtistAlbums)) {
             repository.releaseChanges().collectLatest {
                 state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
             }

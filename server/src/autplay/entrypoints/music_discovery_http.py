@@ -66,6 +66,12 @@ def create_music_discovery_router(
     def download_status(request: Request, operation: UUID) -> dict[str, object]:
         return download_service().command(principal(request), operation, "status")
 
+    @router.post("/downloads/{operation}/device-files")
+    def device_files(
+        request: Request, operation: UUID, offset: Annotated[int, Query(ge=0)] = 0
+    ) -> dict[str, object]:
+        return download_service().device_files(principal(request), operation, offset)
+
     @router.post("/downloads/{operation}/{action}")
     def advance(
         request: Request, operation: UUID, action: Literal["advance", "start"]

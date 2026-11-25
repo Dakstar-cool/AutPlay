@@ -1,5 +1,8 @@
 package app.autplay.playback.presentation
 
+import app.autplay.application.artist.musicDisplayCredit
+import app.autplay.application.artist.musicDisplayTitle
+
 import android.content.ComponentName
 import android.content.Context
 import androidx.core.content.ContextCompat
@@ -224,8 +227,8 @@ class PlaybackPresentationAdapter(
         val next = PlaybackPresentationState(
             miniPlayerDismissed = _state.value.miniPlayerDismissed,
             mediaId = mediaId,
-            title = current?.mediaMetadata?.title?.toString(),
-            artist = current?.mediaMetadata?.artist?.toString(),
+            title = current?.mediaMetadata?.title?.toString()?.let(::musicDisplayTitle),
+            artist = current?.mediaMetadata?.artist?.toString()?.let(::musicDisplayCredit),
             localTrackRefId = current?.mediaMetadata?.extras?.getString("local_user_track_ref_id"),
             positionMs = current?.currentPosition?.coerceAtLeast(0) ?: 0,
             bufferedPositionMs = current?.bufferedPosition?.coerceAtLeast(0) ?: 0,

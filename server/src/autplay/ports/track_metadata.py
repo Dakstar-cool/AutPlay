@@ -16,10 +16,21 @@ class MetadataProviderError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class TrackLoudness:
+    gain_db: float
+    true_peak: float
+
+    def __post_init__(self) -> None:
+        if not -60 <= self.gain_db <= 60 or not 0 < self.true_peak <= 64:
+            raise ValueError("invalid loudness measurement")
+
+
+@dataclass(frozen=True)
 class EmbeddedMetadata:
     fields: MetadataFields
     artwork: bytes | None = None
     duration_ms: int | None = None
+    loudness: TrackLoudness | None = None
 
 
 class EmbeddedMetadataReader(Protocol):

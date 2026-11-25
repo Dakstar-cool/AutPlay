@@ -5,7 +5,7 @@
   <a href="assets/readme/macos-wave.png"><img src="assets/readme/macos-wave.png" width="620" alt="Mac — «Моя волна» и кнопка Add music при первом запуске с пустой медиатекой"></a>
 </p>
 
-**[Скачать для Android][apk]** · **[Скачать для Mac][dmg]** · [Что нового в 1.0.14][release]
+**[Скачать для Android][apk]** · **[Скачать для Mac][dmg]** · [Что нового в 1.0.15][release]
 
 Добавьте свои аудиофайлы и включите «Мою волну» — подборку из вашей медиатеки. Локальная музыка играет офлайн, без аккаунта и сервера.
 
@@ -55,7 +55,7 @@ Android-клиент написан на Kotlin с Jetpack Compose и Media3. Ma
 [guide]: docs/operations/GET_STARTED_1.0.15.md
 [account-guide]: docs/operations/GET_STARTED_1.0.15.md#account
 [rooms-guide]: docs/development/WAVE_ROOMS.md
-[sona]: https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.14/autplay-server-v1.0.14.docker.tar.gz
+[sona]: https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.15/autplay-server-v1.0.15.docker.tar.gz
 [deployment]: docs/operations/DEPLOYMENT.md
 [backup]: docs/operations/BACKUP_RESTORE.md
 [setup]: docs/operations/FULL_PROJECT_SETUP.md

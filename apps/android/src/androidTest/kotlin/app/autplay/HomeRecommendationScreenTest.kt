@@ -83,8 +83,9 @@ class HomeRecommendationScreenTest {
     fun profileHomeShowsRelevantReleaseAndOfflineRecommendationWithoutDuplicateImpression() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         waitForHome()
-        scrollHomeTo(hasText("Relevant release"))
-        composeRule.onNodeWithText("Relevant release").assertIsDisplayed()
+        val releaseTile = hasTestTag("home-release:$RELEASE") and hasText("Relevant release")
+        scrollHomeTo(releaseTile)
+        composeRule.onNode(releaseTile).assertIsDisplayed()
         scrollHomeTo(hasTestTag("home-recommendation"))
         composeRule.onAllNodesWithTag("home-recommendation")[0].performScrollTo().assertIsDisplayed()
         composeRule.waitUntil(timeoutMillis = 10_000) {

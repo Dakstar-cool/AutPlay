@@ -26,15 +26,15 @@ interface TrackMetadataDao {
         SELECT m.local_user_track_ref_id AS localUserTrackRefId, m.payload_json AS payloadJson,
                u.local_recording_id AS localRecordingId, u.raw_title AS rawTitle,
                u.raw_artist AS rawArtist, u.raw_duration_ms AS rawDurationMs,
-               members.added_at_ms AS addedAtMs,
+               COALESCE(members.added_at_ms, u.created_at_ms) AS addedAtMs,
                m.updated_at_ms AS metadataUpdatedAtMs
         FROM track_metadata_projection m
         JOIN user_track_ref u ON u.local_user_track_ref_id=m.local_user_track_ref_id AND u.server_profile_id=m.server_profile_id
-        JOIN members ON members.local_user_track_ref_id = u.local_user_track_ref_id
-        WHERE m.server_profile_id=:profileId AND m.local_user_track_ref_id>:afterTrackId AND u.deleted_at_ms IS NULL
+        LEFT JOIN members ON members.local_user_track_ref_id = u.local_user_track_ref_id
+        WHERE (:personal=0 OR members.local_user_track_ref_id IS NOT NULL) AND m.server_profile_id=:profileId AND m.local_user_track_ref_id>:afterTrackId AND u.deleted_at_ms IS NULL
         ORDER BY m.local_user_track_ref_id ASC LIMIT :limit
     """)
-    suspend fun albumSourcesPage(profileId: String, afterTrackId: String, limit: Int): List<MetadataAlbumSourceRow>
+    suspend fun albumSourcesPage(profileId: String, afterTrackId: String, limit: Int, personal: Boolean = true): List<MetadataAlbumSourceRow>
     @Query("SELECT * FROM metadata_artwork_cache WHERE server_profile_id=:profile AND sha256=:sha")
     suspend fun artwork(profile: String, sha: String): MetadataArtworkEntity?
     @Query("SELECT a.* FROM metadata_artwork_cache a JOIN track_metadata_projection m ON m.server_profile_id=a.server_profile_id AND m.artwork_sha256=a.sha256 WHERE m.server_profile_id=:profile AND m.local_user_track_ref_id=:track")

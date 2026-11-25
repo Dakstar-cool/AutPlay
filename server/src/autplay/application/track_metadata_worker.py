@@ -155,6 +155,8 @@ class TrackMetadataHandler:
                 ref_id,
                 generation,
                 context,
+                audio_variant_id=self.audio.audio_variant_id,
+                loudness=embedded.loudness,
                 fields=embedded.fields,
                 evidence=evidence,
                 artwork=embedded.artwork,

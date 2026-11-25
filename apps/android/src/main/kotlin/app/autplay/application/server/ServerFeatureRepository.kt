@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -336,11 +337,27 @@ class ServerFeatureRepository(
     override suspend fun catalogueTrackReference(contextId: String): CatalogueTrackReference {
         catalogueUuid(contextId)
         val root = musicPost("/music/discovery/contexts/$contextId/track-reference", buildJsonObject {})
-        return CatalogueTrackReference(catalogueUuid(root.requiredString("user_track_ref_id", UUID_TEXT_LENGTH)),
+        return decodeCatalogueReference(root)
+    }
+
+    internal suspend fun catalogDownloadFiles(operation: String, offset: Int): CatalogDevicePage {
+        catalogueUuid(operation)
+        val root = musicPost("/music/discovery/downloads/$operation/device-files?offset=$offset", buildJsonObject {})
+        val files = root.getValue("files").jsonArray.map { value ->
+            val file = value.jsonObject
+            decodeCatalogueReference(file) to catalogueUuid(file.requiredString("audio_variant_id", UUID_TEXT_LENGTH))
+        }
+        val unavailable = root.getValue("unavailable").jsonArray.size
+        val next = root.getValue("next_offset").jsonPrimitive.intOrNull
+        check(files.size + unavailable <= 50 && (next == null || next == offset + 50))
+        return CatalogDevicePage(files, unavailable, next)
+    }
+
+    private fun decodeCatalogueReference(root: JsonObject): CatalogueTrackReference =
+        CatalogueTrackReference(catalogueUuid(root.requiredString("user_track_ref_id", UUID_TEXT_LENGTH)),
             root.requiredLong("row_version"), root.optionalString("recording_id", UUID_TEXT_LENGTH)?.let(::catalogueUuid),
             root.requiredString("title", 2000), root.optionalString("artist", 2000), root.optionalString("album", 2000),
             root["duration_ms"]?.jsonPrimitive?.longOrNull, root.requiredString("resolution_status", 80))
-    }
 
     override suspend fun createMusicCatalogueContext(selection: MusicCatalogueContextRequest): MusicCatalogueContext {
         val request = Request.Builder().url("$apiBaseUrl/music/discovery/contexts")

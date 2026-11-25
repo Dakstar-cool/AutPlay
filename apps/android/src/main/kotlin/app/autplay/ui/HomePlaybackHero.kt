@@ -1,6 +1,7 @@
 package app.autplay.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,6 +102,7 @@ public fun HomePlaybackHero(
     swipeTargets: HomeSwipeTargets = HomeSwipeTargets(),
     onPrevious: () -> Unit = {},
     onNext: () -> Unit = {},
+    onOpenArtist: (() -> Unit)? = null,
 ) {
     val title = state.title ?: stringResource(R.string.player_nothing_playing)
     val artist = state.artist ?: stringResource(R.string.player_unknown_artist)
@@ -116,10 +118,12 @@ public fun HomePlaybackHero(
     }
     val colors = MaterialTheme.colorScheme
     val bitmap = rememberTrackArtworkBitmap(state.trackId)
-    val coverTint = app.autplay.ui.player.rememberArtworkTint(bitmap) ?: colors.secondary
+    val palette = app.autplay.ui.player.rememberArtworkPalette(bitmap)
+    val coverTint = palette?.dominant ?: colors.secondary
+    val secondaryTint = palette?.accent ?: androidx.compose.ui.graphics.lerp(coverTint, colors.tertiary, .35f)
     Column(
         modifier = modifier.fillMaxWidth().testTag("home-playback-hero")
-            .waveGlow(coverTint, androidx.compose.ui.graphics.lerp(coverTint, colors.tertiary, .35f), colors.background)
+            .waveGlow(coverTint, secondaryTint, colors.background)
             .padding(start = 24.dp, end = 24.dp, top = topChromePadding + 6.dp, bottom = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -132,7 +136,9 @@ public fun HomePlaybackHero(
             else -> R.string.home_hero_personal_flow
         }), togetherLabel, onOpenListenTogether)
         Spacer(Modifier.height(6.dp))
-        WaveHeadline(artist)
+        WaveHeadline(artist, if (onOpenArtist == null) Modifier else Modifier
+            .testTag("hero-open-artist").clickable(onClickLabel = stringResource(R.string.detail_open_artist),
+                onClick = onOpenArtist))
         Spacer(Modifier.height(8.dp))
         HomeArtworkCarousel(
             title = title, targets = swipeTargets, motion = motion,
@@ -180,6 +186,7 @@ internal fun HomeWaveStartHero(
     onLike: (String) -> Unit,
     onOpenListenTogether: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenArtist: (() -> Unit)? = null,
 ) {
     val colors = MaterialTheme.colorScheme
     val play = stringResource(R.string.home_my_wave)
@@ -212,7 +219,9 @@ internal fun HomeWaveStartHero(
                         onClick = onResume,
                     )
                     Text(listOfNotNull(state.artist?.takeIf { it.isNotBlank() }, state.title).joinToString(" — "),
-                        Modifier.weight(1f).padding(vertical = 8.dp), textAlign = TextAlign.Center,
+                        Modifier.weight(1f).then(if (onOpenArtist == null) Modifier else
+                            Modifier.testTag("hero-resume-artist").clickable(onClickLabel = stringResource(R.string.detail_open_artist),
+                                onClick = onOpenArtist)).padding(vertical = 8.dp), textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (state.trackId != null) HeroIconButton(
                         icon = if (state.liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
@@ -228,22 +237,22 @@ internal fun HomeWaveStartHero(
 }
 
 @Composable
-private fun WaveHeadline(text: String) {
-    Text(text, Modifier.widthIn(max = 540.dp), textAlign = TextAlign.Center,
+private fun WaveHeadline(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier.widthIn(max = 540.dp), textAlign = TextAlign.Center,
         style = MaterialTheme.typography.displaySmall.copy(fontSize = 46.sp, lineHeight = 48.sp,
             fontWeight = FontWeight.Bold, letterSpacing = (-1).sp),
         maxLines = 3, overflow = TextOverflow.Ellipsis)
 }
 
 private fun Modifier.waveGlow(accent: Color, secondary: Color, base: Color): Modifier = drawWithCache {
-    val intensity = if (base.luminance() < .5f) .74f else .36f
+    val intensity = if (base.luminance() < .5f) .94f else .46f
     val warm = Brush.radialGradient(
-        0f to accent.copy(alpha = intensity), .34f to accent.copy(alpha = intensity * .76f), 1f to accent.copy(alpha = 0f),
-        center = Offset(size.width * .38f, size.height * .53f), radius = size.minDimension * .52f,
+        0f to accent.copy(alpha = intensity), .40f to accent.copy(alpha = intensity * .86f), .72f to accent.copy(alpha = intensity * .38f), 1f to accent.copy(alpha = 0f),
+        center = Offset(size.width * .38f, size.height * .53f), radius = size.minDimension * .68f,
     )
     val halo = Brush.radialGradient(
-        listOf(secondary.copy(alpha = intensity * .72f), secondary.copy(alpha = 0f)),
-        center = Offset(size.width * .67f, size.height * .40f), radius = size.minDimension * .54f,
+        0f to secondary.copy(alpha = intensity * .88f), .46f to secondary.copy(alpha = intensity * .7f), 1f to secondary.copy(alpha = 0f),
+        center = Offset(size.width * .72f, size.height * .54f), radius = size.minDimension * .65f,
     )
     val edge = Brush.verticalGradient(0f to base, .16f to base.copy(alpha = 0f),
         .82f to base.copy(alpha = 0f), 1f to base)

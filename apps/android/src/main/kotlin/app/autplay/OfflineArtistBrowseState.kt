@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.produceState
 import app.autplay.application.artist.ArtistCatalogPort
 import app.autplay.application.artist.ArtistSummary
-import app.autplay.domain.ServerProfileId
+import app.autplay.application.artist.artistScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 
@@ -26,18 +26,10 @@ internal fun rememberOfflineArtistBrowseSnapshot(
     artistCatalogPort: ArtistCatalogPort,
     profileId: String?,
 ): OfflineArtistBrowseSnapshot {
-    val initial = if (profileId == null) {
-        OfflineArtistBrowseSnapshot(OfflineArtistBrowseStatus.Unavailable)
-    } else {
-        OfflineArtistBrowseSnapshot(OfflineArtistBrowseStatus.Loading)
-    }
+    val initial = OfflineArtistBrowseSnapshot(OfflineArtistBrowseStatus.Loading)
     return produceState(initial, artistCatalogPort, profileId) {
-        if (profileId == null) {
-            value = OfflineArtistBrowseSnapshot(OfflineArtistBrowseStatus.Unavailable)
-            return@produceState
-        }
         try {
-            artistCatalogPort.observeBrowse(ServerProfileId(profileId), MAX_ARTISTS).collect { artists ->
+            artistCatalogPort.observeBrowse(artistScope(profileId), MAX_ARTISTS).collect { artists ->
                 value = OfflineArtistBrowseSnapshot(OfflineArtistBrowseStatus.Ready, artists)
             }
         } catch (cancelled: CancellationException) {

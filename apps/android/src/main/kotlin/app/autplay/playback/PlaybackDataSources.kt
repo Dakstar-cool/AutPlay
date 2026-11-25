@@ -102,7 +102,15 @@ object PlaybackMediaSourceFactory {
         }
         val delegate = DefaultMediaSourceFactory(routing, playbackExtractorsFactory())
             .setLoadErrorHandlingPolicy(PlaybackLoadErrorPolicy())
-        val reporting = onTimeline?.let { PlaybackSourceTimelineFactory(delegate, it) } ?: delegate
+        val measured = object : androidx.media3.exoplayer.source.MediaSource.Factory by delegate {
+            override fun createMediaSource(mediaItem: androidx.media3.common.MediaItem): androidx.media3.exoplayer.source.MediaSource {
+                val loudness = mediaItem.localConfiguration?.tag as? ServerLoudness
+                    ?: return delegate.createMediaSource(mediaItem)
+                return DefaultMediaSourceFactory(routing, MeasuredAudioExtractors(loudness))
+                    .setLoadErrorHandlingPolicy(PlaybackLoadErrorPolicy()).createMediaSource(mediaItem)
+            }
+        }
+        val reporting = onTimeline?.let { PlaybackSourceTimelineFactory(measured, it) } ?: measured
         return ResolvingMediaSourceFactory(reporting)
     }
 }

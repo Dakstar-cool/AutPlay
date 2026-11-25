@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from autplay.adapters.public_music_search import MusicBrainzDiscoveryProvider
@@ -77,6 +77,40 @@ def test_album_search_keeps_same_title_different_editions_and_partial_dates() ->
     assert [item.release_date for item in page.items] == ["1998", "2020-03"]
     assert all(item.release_id == item.entity_id for item in page.items)
     assert all(item.download_search_query is None for item in page.items)
+
+
+def test_artist_browse_requires_direct_credit_and_preserves_links_to_joint_artists() -> None:
+    artist_id, guest_id, unrelated_id = uuid4(), uuid4(), uuid4()
+
+    def recording(title: str, *ids: UUID) -> dict[str, object]:
+        return {
+            "id": str(uuid4()),
+            "title": title,
+            "artist-credit": [
+                {"artist": {"id": str(identity), "name": f"Artist {index}"}}
+                for index, identity in enumerate(ids)
+            ],
+        }
+
+    rows = [
+        recording("Solo", artist_id),
+        {
+            **recording("Together", guest_id, artist_id),
+            "relations": [
+                {"target-type": "work", "type": "performance", "attributes": ["cover", "live"]}
+            ],
+        },
+        recording("Unrelated", unrelated_id),
+    ]
+    page = MusicBrainzDiscoveryProvider(
+        Http({"recording-count": 3, "recordings": rows})
+    ).artist_tracks(artist_id, limit=3, offset=0)
+    assert [item.title for item in page.items] == ["Solo", "Together"]
+    assert page.items[1].view()["performance_types"] == ["cover", "live"]
+    assert [member["mbid"] for member in page.items[1].artist_members] == [
+        str(guest_id),
+        str(artist_id),
+    ]
 
 
 def test_artist_drilldown_is_uuid_browse_preserves_versions_and_unknown_duration() -> None:

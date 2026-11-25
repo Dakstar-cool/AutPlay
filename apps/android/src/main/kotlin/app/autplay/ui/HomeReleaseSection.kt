@@ -116,7 +116,7 @@ private fun HomeReleaseListRow(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AutPlayArtwork(release.title, size = 48.dp,
-                    trackId = release.artworkTrackId)
+                    trackId = release.artworkTrackId, catalogCoverId = release.releaseMbid)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(release.title, style = MaterialTheme.typography.labelLarge,
                         maxLines = 3, overflow = TextOverflow.Ellipsis)

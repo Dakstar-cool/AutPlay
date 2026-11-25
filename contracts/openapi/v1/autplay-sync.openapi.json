@@ -708,6 +708,7 @@
                 "oneOf": [{"$ref": "#/components/schemas/OpaqueToken"}, {"type": "null"}]
               },
               "next_cursor": {"$ref": "#/components/schemas/OpaqueToken"},
+              "personal_library_version": {"const": 1, "description": "Negotiated PERSONAL_LIBRARY_V1 projection."},
               "has_more": {"type": "boolean"},
               "events": {
                 "type": "array",
@@ -778,6 +779,7 @@
               "next_page_token": {
                 "oneOf": [{"$ref": "#/components/schemas/OpaqueToken"}, {"type": "null"}]
               },
+              "personal_library_version": {"const": 1, "description": "Negotiated PERSONAL_LIBRARY_V1 projection."},
               "has_more": {"type": "boolean"},
               "snapshot_cursor": {
                 "oneOf": [{"$ref": "#/components/schemas/OpaqueToken"}, {"type": "null"}]

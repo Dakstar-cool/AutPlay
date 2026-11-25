@@ -1,7 +1,9 @@
 package app.autplay.playback
 
 import app.autplay.application.library.decoded
+import app.autplay.application.library.TrackMetadata
 import app.autplay.application.library.TrackMetadataRepository
+import app.autplay.data.local.entity.UserTrackRefEntity
 
 import android.content.Intent
 import androidx.core.net.toUri
@@ -779,6 +781,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                     item = MediaItem.Builder()
                         .setMediaId(entry.queueEntryId)
                         .setUri(resolved.value.runtimeUri)
+                        .setTag(gainForSource(resolved.value, originalTrack, description))
                         .setMediaMetadata(
                             MediaMetadata.Builder()
                                 .setTitle(track?.rawTitle ?: "Unavailable title")
@@ -799,6 +802,30 @@ class AutPlayPlaybackService : MediaSessionService() {
                 )
             }
         }
+
+    private suspend fun gainForSource(source: ResolvedPlaybackSource, track: UserTrackRefEntity?,
+        description: TrackMetadata?): ServerLoudness? {
+        val reference = track?.serverUserTrackRefId ?: return null
+        serverLoudness(description?.payload, source, track.serverProfileId)?.let { return it }
+        // A catalogue track may start streaming before its first metadata sync.
+        if (source.source != SelectedAudioSource.VAULT_STREAM || (description?.revision ?: 0) > 0 ||
+            audioPreferences.value.replayGainMode == "OFF") return null
+        val active = applicationNonSecretSettingsStore(applicationContext).settings.first()
+        val profile = active.activeServerProfileId ?: return null
+        if (active.accountSignedOut || profile.value != source.runtimeUri.authority || profile.value != track.serverProfileId) return null
+        val binding = ClientEventBinding(active.activeUserId ?: return null, active.deviceId ?: return null, profile)
+        return try {
+            kotlinx.coroutines.withTimeoutOrNull(1_200) {
+                val payload = AutPlayRuntime.serverFeatures(applicationContext, binding).trackMetadata(reference)
+                TrackMetadataRepository(applicationContext).project(profile.value, track.localUserTrackRefId, payload)
+                serverLoudness(payload, source, profile.value)
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun mediaText(description: app.autplay.application.library.TrackMetadata?, field: String, fallback: String?): String? =
         // Media3 fills nulls from embedded tags; an explicit user clear must override them.

@@ -643,4 +643,11 @@
     <string name="detail_open_artist">Open artist</string>
     <string name="detail_artist_info">About the artist</string>
     <string name="detail_hide_artist_info">Hide artist details</string>
+    <string name="personal_library_search">Search my music</string>
+    <string name="personal_search_clear">Clear</string>
+    <string name="device_this_phone">%1$s · this phone</string>
+    <string name="device_disconnect">Disconnect device</string>
+    <string name="device_disconnect_explanation">Revoke access for the selected installation?</string>
+    <string name="device_other_installations">Other installations (%1$d)</string>
+    <string name="device_session_count">%1$s (%2$d)</string>
 </resources>
