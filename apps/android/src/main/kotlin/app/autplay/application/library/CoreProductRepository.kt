@@ -1,5 +1,6 @@
 package app.autplay.application.library
 
+import app.autplay.application.artist.trackNames
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.application.playback.OrdinaryQueueReplacementGuard
 import app.autplay.data.local.entity.RecordingProjectionEntity
@@ -26,9 +27,13 @@ class CoreProductRepository(
     private val database: AutPlayDatabase,
 ) {
     private val metadataAlbums = AlbumGroupRepository(database)
-    fun libraryEntries(profileId: String?, limit: Int = 5_000): Flow<List<CoreLibraryEntrySummary>> {
-        require(limit in 1..5_000)
-        return database.libraryDao().browseLibrary(effectiveProfile(profileId), limit)
+    fun libraryEntries(profileId: String?, limit: Int = Int.MAX_VALUE): Flow<List<CoreLibraryEntrySummary>> {
+        require(limit > 0)
+        return database.libraryDao().browseLibrary(effectiveProfile(profileId), if (limit == Int.MAX_VALUE) -1 else limit)
+            .mapLatest { rows -> withContext(Dispatchers.Default) { rows.map { row ->
+                val names = trackNames(row.nameInput, row.artistName, row.title, row.hasTitle, row.hasArtist, row.cleanSourceTitle, row.cleanSourceArtist)
+                row.copy(title = names.title, artistName = names.artist)
+            } } }
     }
 
     fun recentlyAdded(profileId: String?, limit: Int = 12): Flow<List<CoreHomeTrackSummary>> {
@@ -147,17 +152,25 @@ class CoreProductRepository(
         val pages = trackIds.chunked(MAX_IN_QUERY_BINDINGS)
         val editions = pages.flatMap { catalog.editionsForTracks(profile, it) }.distinctBy { it.releaseId }
         val keys = editions.mapNotNull { it.releaseMbid }.toSet()
-        val metadata = metadataAlbums.snapshot(profile, personal = false).filter { album ->
-            album.members.any { it.localUserTrackRefId in trackIds } &&
-                !(album.group.provider == "MUSICBRAINZ" && album.group.releaseId in keys)
+        val projector = MetadataAlbumProjector()
+        for (page in pages) database.trackMetadataDao().artistAlbumSources(profile, page).forEach(projector::add)
+        val metadata = projector.albums().filterNot { album ->
+            album.group.provider == "MUSICBRAINZ" && album.group.releaseId in keys
         }
         return editions.map { row -> CoreReleaseSummary(editionTargetId(row.releaseId), row.album, row.albumArtist,
-            row.releaseDate, mbid = row.releaseMbid) } +
+            row.releaseDate, mbid = row.releaseMbid, releaseGroup = row.releaseGroupId) } +
             metadata.map { album -> CoreReleaseSummary(album.group.stableId, album.group.title, album.group.albumArtist,
                 album.group.releaseDate, artworkTrackId = album.artworkTrackId,
                 mbid = album.group.releaseId.takeIf { album.group.provider == "MUSICBRAINZ" }) } +
             pages.flatMap { catalog.taggedAlbumTracks(profile, it, false, false).first() }.summaries()
     }
+
+    fun artistChanges(): Flow<Unit> = database.invalidationTracker.createFlow(
+        "track_metadata_projection", "user_track_ref", "library_entry", "user_track_preference", "playlist", "playlist_entry",
+        "release_projection", "release_track_projection", "recording_projection", "catalog_edition_track", "artist_projection",
+        "artist_credit_projection", "artist_credit_name_projection", "catalog_artist_credit_link", "catalog_artist_credit_link_owner",
+        "listening_event", emitInitialState = false,
+    ).map { }
 
     fun releaseChanges(): Flow<Unit> = database.invalidationTracker.createFlow(
         "track_metadata_projection", "user_track_ref", "library_entry", "user_track_preference", "playlist", "playlist_entry",
@@ -231,12 +244,13 @@ class CoreProductRepository(
             track.resolutionStatus == "RESOLVED" &&
             track.deletedAtMs == null
         val metadata = database.trackMetadataDao().get(track.serverProfileId, localUserTrackRefId)?.decoded()
+        val names = metadata.names(track.rawTitle ?: recording?.title, track.rawArtist ?: recording?.displayArtist)
         return CoreTrackDetail(
             localUserTrackRefId = track.localUserTrackRefId,
             localRecordingId = track.localRecordingId,
             serverRecordingId = track.serverRecordingId?.let(::ServerId),
-            title = if (metadata == null) recording?.title ?: track.rawTitle else metadata.text("title", recording?.title ?: track.rawTitle),
-            artistName = if (metadata == null) recording?.displayArtist ?: track.rawArtist else metadata.text("artist", recording?.displayArtist ?: track.rawArtist),
+            title = names.title,
+            artistName = names.artist,
             albumName = if (metadata == null) track.rawAlbum else metadata.text("album", track.rawAlbum),
             metadata = metadata,
             durationMs = recording?.durationMs ?: track.rawDurationMs,
@@ -270,6 +284,12 @@ class CoreProductRepository(
     }
 
     suspend fun releaseDetail(localReleaseId: String, profileId: String?): CoreReleaseDetail? {
+        if (localReleaseId.startsWith(ARTIST_ALBUM_PREFIX)) {
+            val ids = localReleaseId.removePrefix(ARTIST_ALBUM_PREFIX).split('|').distinct()
+            if (ids.any { it.startsWith(ARTIST_ALBUM_PREFIX) || it.isBlank() }) return null
+            val editions = ids.mapNotNull { releaseDetail(it, profileId) }
+            return combineArtistEditions(localReleaseId, editions)
+        }
         val profile = effectiveProfile(profileId)
         val catalog = database.catalogProjectionDao()
         if (localReleaseId.startsWith("tag-album:")) {
@@ -301,7 +321,7 @@ class CoreProductRepository(
                     header.releaseType, null, rows.map { row ->
                         val ref = refs[row.recordingId]
                         CoreReleaseDetailTrack(row.trackId, ref?.localRecordingId, row.disc, row.position, row.numberText,
-                            row.title, row.artist, row.durationMs, ref?.localUserTrackRefId)
+                            row.title, row.artist, row.durationMs, ref?.localUserTrackRefId, serverRecordingId = row.recordingId)
                     }, collectionArtwork(profileId, refs.values.map { it.localUserTrackRefId }), header.releaseMbid)
             }
         }
@@ -379,12 +399,13 @@ class CoreProductRepository(
                 val track = trackRefs[entry.localUserTrackRefId]
                 val recording = track?.localRecordingId?.let(recordings::get)
                 val description = metadata[entry.localUserTrackRefId]?.decoded()
+                val names = description.names(track?.rawTitle ?: recording?.title, track?.rawArtist ?: recording?.displayArtist)
                 CorePlaylistDetailEntry(
                     // This is the UI identity. Do not substitute the repeated track-ref ID.
                     localPlaylistEntryId = entry.localPlaylistEntryId,
                     localUserTrackRefId = entry.localUserTrackRefId,
-                    title = if (description == null) recording?.title ?: track?.rawTitle else description.text("title", recording?.title ?: track?.rawTitle),
-                    artistName = if (description == null) recording?.displayArtist ?: track?.rawArtist else description.text("artist", recording?.displayArtist ?: track?.rawArtist),
+                    title = names.title,
+                    artistName = names.artist,
                     durationMs = recording?.durationMs ?: track?.rawDurationMs,
                     unavailable = track == null || track.deletedAtMs != null || track.resolutionStatus == "CATALOG_ONLY",
                 )
@@ -398,8 +419,9 @@ class CoreProductRepository(
         chunks.flatMap { database.libraryDao().trackRefs(it, it.size) }
             .filter { it.serverProfileId == profileId && it.deletedAtMs == null }.map { track ->
                 val values = metadata[track.localUserTrackRefId]?.decoded()
-                if (values == null) track else track.copy(rawTitle = values.text("title", track.rawTitle),
-                    rawArtist = values.text("artist", track.rawArtist), rawAlbum = values.text("album", track.rawAlbum))
+                val names = values.names(track.rawTitle, track.rawArtist)
+                track.copy(rawTitle = names.title, rawArtist = names.artist,
+                    rawAlbum = if (values == null) track.rawAlbum else values.text("album", track.rawAlbum))
             }.associateBy { it.localUserTrackRefId }
     }
 
@@ -417,6 +439,7 @@ class CoreProductRepository(
             artistName = creditedArtist.ifBlank { recording?.displayArtist.orEmpty() },
             durationMs = durationMs ?: recording?.durationMs,
             localUserTrackRefId = localUserTrackRefId,
+            serverRecordingId = recording?.serverRecordingId,
         )
 
     private fun effectiveProfile(profileId: String?): String = profileId ?: LEGACY_PROFILE_ID
@@ -433,7 +456,7 @@ class CoreProductRepository(
 
 data class CoreReleaseSummary(val stableId: String, val title: String, val artistName: String?,
     val releaseDateText: String? = null, val ownedTrackCount: Int? = null,
-    val artworkTrackId: String? = null, val mbid: String? = null)
+    val artworkTrackId: String? = null, val mbid: String? = null, val releaseGroup: String? = null)
 typealias CoreLibraryEntrySummary = app.autplay.data.local.dao.LibraryBrowseRow
 data class CoreHomeTrackSummary(
     val stableId: String,
@@ -510,6 +533,7 @@ data class CoreReleaseDetailTrack(
     val artistName: String,
     val durationMs: Long?,
     val localUserTrackRefId: String?,
+    val serverRecordingId: String? = null,
 )
 
 data class CorePlaylistDetail(
@@ -610,6 +634,26 @@ object CoreProductDetailPolicy {
         "DEFERRED_EVIDENCE",
         "UNRESOLVED",
     )
+}
+
+internal const val ARTIST_ALBUM_PREFIX = "artist-editions:"
+
+internal fun combineArtistEditions(id: String, editions: List<CoreReleaseDetail>): CoreReleaseDetail? {
+    val header = editions.maxByOrNull { it.tracks.size } ?: return null
+    val allTracks = editions.flatMap { it.tracks }
+    val serversByLocal = allTracks.mapNotNull { row ->
+        row.localRecordingId?.let { local -> row.serverRecordingId?.let { local to it } }
+    }.toMap()
+    val serversByTrack = allTracks.mapNotNull { row ->
+        row.localUserTrackRefId?.let { local -> row.serverRecordingId?.let { local to it } }
+    }.toMap()
+    val tracks = allTracks.sortedBy { it.localUserTrackRefId == null }
+        .distinctBy { row -> row.serverRecordingId ?: serversByLocal[row.localRecordingId] ?: serversByTrack[row.localUserTrackRefId]
+            ?: row.localRecordingId ?: row.localUserTrackRefId ?: row.localReleaseTrackId }
+        .sortedWith(compareBy<CoreReleaseDetailTrack> { it.mediumPosition ?: Int.MAX_VALUE }
+            .thenBy { it.sequenceNo ?: Int.MAX_VALUE }.thenBy { it.title })
+    return header.copy(localReleaseId = id, tracks = tracks,
+        artworkTrackId = editions.firstNotNullOfOrNull { it.artworkTrackId })
 }
 
 internal const val EDITION_PREFIX = "catalog-edition:"

@@ -65,7 +65,7 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0078_playlist_snapshots"]
+    assert heads == ["0079_music_preservation"]
     assert heads == [EXPECTED_MIGRATION_HEAD]
 
     database_harness.upgrade(empty_database_name)
@@ -224,6 +224,7 @@ def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHar
         "0076_internet_search_25",
         "0077_catalog_browse_pages",
         "0078_playlist_snapshots",
+        "0079_music_preservation",
     ]
     assert all(not isinstance(revision.down_revision, tuple) for revision in revisions)
 

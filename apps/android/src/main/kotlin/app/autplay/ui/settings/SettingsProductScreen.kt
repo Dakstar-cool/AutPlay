@@ -131,18 +131,6 @@ internal fun SettingsProductScreen(
                         onUpdate { current -> current.copy(downloadOnMeteredNetwork = enabled) }
                     },
                 )
-                HorizontalDivider()
-                Text(stringResource(R.string.settings_room_downloads), style = MaterialTheme.typography.titleSmall)
-                ChoiceColumn {
-                    listOf("OFF", "NEXT", "NEXT_3", "AGGRESSIVE_WIFI").forEach { mode ->
-                        FilterChip(
-                            selected = settings.wavePrefetchMode == mode,
-                            onClick = { onUpdate { current -> current.copy(wavePrefetchMode = mode) } },
-                            label = { Text(settingsWavePrefetchLabel(mode)) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
             }
             SettingsPageSurface {
                 Text(stringResource(R.string.settings_phone_music), style = MaterialTheme.typography.titleMedium)
@@ -339,15 +327,6 @@ private fun settingsSummary(destination: UiDestination, settings: NonSecretSetti
 }
 
 @Composable
-private fun ChoiceColumn(content: @Composable () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-        content = { content() },
-    )
-}
-
-@Composable
 private fun SettingsSwitchRow(
     label: String,
     checked: Boolean,
@@ -372,13 +351,3 @@ private fun SettingsSwitchRow(
         )
     }
 }
-
-@Composable
-private fun settingsWavePrefetchLabel(mode: String): String = stringResource(
-    when (mode) {
-        "OFF" -> R.string.settings_wave_prefetch_off
-        "NEXT_3" -> R.string.settings_wave_prefetch_three
-        "AGGRESSIVE_WIFI" -> R.string.settings_wave_prefetch_wifi
-        else -> R.string.settings_wave_prefetch_next
-    },
-)

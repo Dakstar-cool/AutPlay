@@ -138,7 +138,8 @@ class CoreProductStateTest {
     @Test
     fun filteringAndSortingRetainsStableTrackIdentity() {
         val tracks = listOf(
-            track("two", "Beta", 2, loved = true, downloaded = false),
+            track("two", "Beta", 2, loved = true, downloaded = false).copy(onDevice = true),
+            track("device", "Local", 4, loved = false, downloaded = false).copy(onDevice = true),
             track("one", "alpha", 1, loved = true, downloaded = true),
             track("missing", "Lost", 3, loved = false, downloaded = false, TrackAvailability.Missing),
         )
@@ -146,6 +147,10 @@ class CoreProductStateTest {
         assertEquals(
             listOf("one", "two"),
             filterAndSortTracks(tracks, LibraryFilter.Loved, LibrarySort.Title).map { it.stableId },
+        )
+        assertEquals(
+            listOf("two", "device"),
+            filterAndSortTracks(tracks, LibraryFilter.OnDevice, LibrarySort.Title).map { it.stableId },
         )
         assertEquals(
             listOf("missing"),

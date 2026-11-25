@@ -1,10 +1,14 @@
 package app.autplay.application.library
 
+import android.content.ContentUris
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import android.util.Size
 import androidx.core.graphics.scale
 import app.autplay.AutPlayRuntime
 import app.autplay.application.search.refreshTrackSearch
@@ -108,7 +112,9 @@ class TrackMetadataRepository(
     suspend fun readLocal(track: String, uri: Uri) = withContext(Dispatchers.IO) {
         val ref = database.libraryDao().trackRef(track) ?: return@withContext
         val existing = database.trackMetadataDao().get(ref.serverProfileId, track)?.decoded()
-        if (existing?.payload?.get("local_reader_version")?.jsonPrimitive?.intOrNull == 1) return@withContext
+        val version = existing?.payload?.get("local_reader_version")?.jsonPrimitive?.intOrNull ?: 0
+        if (version >= 3 || (version == 2 && (existing?.payload?.get("local_artwork_sha256") as? JsonPrimitive)?.contentOrNull != null))
+            return@withContext
         val reader = MediaMetadataRetriever()
         try {
             reader.setDataSource(context, uri)
@@ -116,6 +122,7 @@ class TrackMetadataRepository(
             val platformFields = buildJsonObject {
                 mapOf("title" to MediaMetadataRetriever.METADATA_KEY_TITLE, "artist" to MediaMetadataRetriever.METADATA_KEY_ARTIST,
                     "album" to MediaMetadataRetriever.METADATA_KEY_ALBUM, "album_artist" to MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST,
+                    "composer" to MediaMetadataRetriever.METADATA_KEY_COMPOSER,
                     "release_date" to MediaMetadataRetriever.METADATA_KEY_DATE).forEach { (key, tag) ->
                     val value = reader.extractMetadata(tag)?.trim()?.takeIf { it.length in 1..500 }
                     if (value != null && (key != "release_date" || validMetadataDate(value))) { put(key, value); if (key == "release_date") hasDate = true }
@@ -125,9 +132,10 @@ class TrackMetadataRepository(
             }
             val values = JsonObject(platformFields + embeddedId3Fields(context, uri))
             val artwork = reader.embeddedPicture?.takeIf { it.size <= 4_194_304 }?.let { normalizeArtwork(it) }
+                ?: mediaStoreArtwork(uri)
             val sha = artwork?.let { storeArtwork(ref.serverProfileId, it) }
             val root = buildJsonObject {
-                put("revision", 0); put("state", "LOCAL"); put("fields", values); put("local_reader_version", 1)
+                put("revision", 0); put("state", "LOCAL"); put("fields", values); put("local_reader_version", 3)
                 put("provenance", buildJsonObject { values.keys.forEach { field -> put(field, buildJsonObject {
                     put("source", "EMBEDDED"); put("source_id", "local-file"); put("locked", false)
                 }) } })
@@ -139,14 +147,38 @@ class TrackMetadataRepository(
         }
     }
 
+    private fun mediaStoreArtwork(uri: Uri): ByteArray? {
+        if (Build.VERSION.SDK_INT < 29 || uri.scheme != "content" || uri.authority != MediaStore.AUTHORITY) return null
+        val path = uri.pathSegments
+        if (path.size != 4 || path[1] != "audio" || path[2] != "media" || path[3].toLongOrNull() == null) return null
+        return try {
+            val resolver = context.contentResolver
+            val projection = arrayOf(MediaStore.Audio.Media.ALBUM_ID, MediaStore.Audio.Media.ALBUM)
+            val id = resolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst() || cursor.isNull(0) || cursor.getString(1).isNullOrBlank() ||
+                    cursor.getString(1) == MediaStore.UNKNOWN_STRING) null else cursor.getLong(0).takeIf { it > 0 }
+            } ?: return null
+            val album = ContentUris.withAppendedId(MediaStore.Audio.Albums.getContentUri(MediaStore.getVolumeName(uri)), id)
+            normalizeBitmap(resolver.loadThumbnail(album, Size(500, 500), null))
+        } catch (_: java.io.IOException) { null }
+          catch (_: SecurityException) { null }
+          catch (_: IllegalArgumentException) { null }
+    }
+
     private fun normalizeArtwork(bytes: ByteArray): ByteArray? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth !in 1..4096 || bounds.outHeight !in 1..4096) return null
-        val image = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        val sample = Integer.highestOneBit(maxOf(bounds.outWidth, bounds.outHeight) / 500).coerceAtLeast(1)
+        val options = BitmapFactory.Options().apply { inSampleSize = sample }
+        val image = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+        return normalizeBitmap(image)
+    }
+
+    private fun normalizeBitmap(image: Bitmap): ByteArray? {
         val factor = minOf(1f, 500f / maxOf(image.width, image.height))
         val resized = image.scale(maxOf(1, (image.width * factor).toInt()), maxOf(1, (image.height * factor).toInt()), true)
-        return try { ByteArrayOutputStream().use { output -> resized.compress(Bitmap.CompressFormat.JPEG, 85, output); output.toByteArray() } }
+        return try { ByteArrayOutputStream().use { output -> if (resized.compress(Bitmap.CompressFormat.JPEG, 85, output)) output.toByteArray() else null } }
         finally { if (resized !== image) resized.recycle(); image.recycle() }
     }
 

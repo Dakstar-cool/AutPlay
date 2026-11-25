@@ -36,13 +36,15 @@ internal fun CatalogArtistHeader(name: String, artistId: String) {
     val binding = if (active?.activeUserId != null && active.deviceId != null && active.activeServerProfileId != null)
         ClientEventBinding(active.activeUserId, active.deviceId, active.activeServerProfileId) else null
     val releases = rememberArtistCatalogPages(context, binding, artistId, editions = true, firstPageOnly = true)
-    ArtistHeader(name, releaseId = releases.items.firstNotNullOfOrNull { it.releaseId })
+    ArtistHeader(name, artistMbid = artistId, releaseId = releases.items.firstNotNullOfOrNull { it.releaseId })
 }
 
 @Composable
 internal fun ArtistHeader(name: String, subtitle: String? = null, artworkTrackId: String? = null,
-    releaseId: String? = null, trackCount: Int? = null) {
+    releaseId: String? = null, trackCount: Int? = null, artistMbid: String? = null,
+    artistTracks: List<String> = emptyList(), artistCredits: List<String> = emptyList()) {
     val colors = MaterialTheme.colorScheme
+    val portrait = rememberLibraryPortrait(name, artistTracks, artistCredits) ?: rememberCatalogCover(artistMbid, portrait = true)
     val art = rememberTrackArtwork(artworkTrackId) ?: rememberCatalogCover(releaseId)
     Box(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).testTag("artist-header")) {
         Box(Modifier.matchParentSize().background(Brush.linearGradient(listOf(colors.primary, colors.tertiary))))
@@ -50,11 +52,7 @@ internal fun ArtistHeader(name: String, subtitle: String? = null, artworkTrackId
         Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .85f)))))
         Row(Modifier.fillMaxWidth().heightIn(min = 144.dp).padding(16.dp), verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(shape = CircleShape, color = colors.secondaryContainer, modifier = Modifier.size(48.dp).testTag("artist-avatar")) {
-                val initials = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2)
-                    .joinToString("") { it.substring(0, it.offsetByCodePoints(0, 1)).uppercase() }
-                Box(contentAlignment = Alignment.Center) { Text(initials, style = MaterialTheme.typography.titleMedium) }
-            }
+            ArtistAvatar(name, portrait, Modifier.testTag("artist-avatar"))
             Column {
                 Text(name, style = MaterialTheme.typography.headlineSmall, color = Color.White,
                     modifier = Modifier.semantics { heading() })
@@ -63,5 +61,15 @@ internal fun ArtistHeader(name: String, subtitle: String? = null, artworkTrackId
                 if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodyMedium, color = Color.White)
             }
         }
+    }
+}
+
+@Composable
+internal fun ArtistAvatar(name: String, portrait: androidx.compose.ui.graphics.painter.Painter?, modifier: Modifier = Modifier) {
+    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, modifier = modifier.size(48.dp)) {
+        val initials = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2)
+            .joinToString("") { it.substring(0, it.offsetByCodePoints(0, 1)).uppercase() }
+        if (portrait != null) Image(portrait, name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        else Box(contentAlignment = Alignment.Center) { Text(initials, style = MaterialTheme.typography.titleMedium) }
     }
 }

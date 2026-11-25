@@ -29,18 +29,19 @@ internal class PersonalLibrarySearch(
         val state = LibraryScreenUiState(localMode = profile == null, tracks = emptyList(), section = section, filter = filter)
         val owner = profile ?: "legacy-unscoped"
         val titleQuery = musicSearchKey(query)
-        val artistQuery = artistSearchKey(query)
+        val artistQuery = artistSearchKey(app.autplay.application.artist.StageCredits.display(query.trim()))
         fun matches(value: String?) = value != null && titleQuery in musicSearchKey(value)
         fun matchesCredit(credit: String?) = credit != null && artistQuery in artistSearchKey(credit)
         val results = when (section) {
-            LibrarySection.Tracks -> database.libraryDao().browseLibrary(owner, Int.MAX_VALUE).map { rows ->
+            LibrarySection.Tracks -> library.libraryEntries(profile).map { rows ->
                 state.copy(tracks = rows.filter { (filter != LibraryFilter.Loved || it.loved) &&
+                    (filter != LibraryFilter.OnDevice || it.onDevice) &&
                     (matches(it.title) || matchesCredit(it.artistName)) }.map {
                     CoreTrackUiItem(it.localUserTrackRefId, it.title.orEmpty(), it.artistName, loved = it.loved)
                 })
             }
             LibrarySection.Artists -> artists.search(artistScope(profile), query, personal = true).map { rows ->
-                state.copy(artists = rows.map { artist -> CoreArtistUiItem(artist.key.artistId.value, artist.name, artist.disambiguation) })
+                state.copy(artists = rows.map { artist -> CoreArtistUiItem(artist.key.artistId.value, artist.name, artist.disambiguation, artist.portraitTrackIds, artist.portraitArtistIds) })
             }
             LibrarySection.Albums -> library.releaseSummaries(profile, Int.MAX_VALUE).map { rows ->
                 state.copy(albums = rows.filter { matches(it.title) || matchesCredit(it.artistName) }.map {

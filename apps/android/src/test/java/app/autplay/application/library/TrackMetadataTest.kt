@@ -15,6 +15,15 @@ class TrackMetadataTest {
         assertEquals("Original", value.text("title", "Original"))
         assertEquals("1998", value.text("release_date"))
     }
+    @Test fun cachedSourceTitlesRefreshWhileManualEditsKeepTheirSpelling() {
+        val title = "По разные стороны (Mood Video)"
+        fun cached(source: String, locked: Boolean) = TrackMetadata.decode(Json.parseToJsonElement(
+            """{"revision":2,"state":"READY","fields":{"title":"$title"},"provenance":{"title":{"source":"$source","normalization_version":"display-v6","locked":$locked}}}"""
+        ).jsonObject)
+        assertEquals("По разные стороны", cached("SOURCE_NATIVE", false).names(title, "Максим Свобода").title)
+        assertEquals(title, cached("USER", true).names(title, "Максим Свобода").title)
+    }
+
     @Test fun oversizedCandidatesAndRemoteLocatorsAreRejected() {
         val six = JsonArray(List(6) { JsonObject(emptyMap()) })
         assertThrows(IllegalArgumentException::class.java) { TrackMetadata.decode(buildJsonObject {

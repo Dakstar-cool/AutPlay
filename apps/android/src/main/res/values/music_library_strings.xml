@@ -56,4 +56,8 @@
     <string name="catalog_match_missing">Insufficient matching metadata</string>
     <string name="catalog_track_failed">Download failed</string>
     <string name="catalogue_on_phone">On this device</string>
+    <string name="download_wait_network">Waiting for a network connection</string>
+    <string name="download_wait_unmetered">Waiting for an unmetered connection</string>
+    <string name="download_allow_metered">Allow downloads on metered networks</string>
+    <string name="player_find_phone_audio">Find this track on the phone</string>
 </resources>

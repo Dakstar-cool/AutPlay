@@ -2,14 +2,19 @@
 
 import base64
 import json
+import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from autplay.adapters.postgresql.catalog_pages import CatalogPageCache
 from autplay.adapters.public_track_metadata import is_cover_url
+from autplay.application.artist_overview import artist_overview_view, build_artist_overview
 from autplay.application.music_library import MusicError
 from autplay.domain.auth import Principal
+from autplay.domain.catalog_artwork import image_url
 from autplay.domain.music_discovery import (
     MAX_BROWSE_OFFSET,
     MAX_DISCOVERY_OFFSET,
@@ -38,41 +43,95 @@ class MusicDiscoveryService:
         self.page_cache = page_cache
         self.read_public = read_public
 
-    def release_cover(self, principal: Principal, release: UUID) -> bytes:
-        reader, cache = self.read_public, self.page_cache
-        if reader is None or cache is None:
-            raise MusicError("catalog_cover_missing", "Cover unavailable.", 404)
-
-        def refresh() -> dict[str, object]:
-            url = f"https://coverartarchive.org/release/{release}/front-250"
-            for _ in range(5):
-                if not is_cover_url(url):
+    def _image(self, principal: Principal, url: str) -> dict[str, object]:
+        assert self.read_public is not None
+        is_portrait = bool(image_url(url, "artist"))
+        for _ in range(5):
+            if not is_cover_url(url) or bool(image_url(url, "artist")) != is_portrait:
+                break
+            data = self.read_public(principal, url)
+            if data is None:
+                return {}
+            if data.startswith((bytes.fromhex("ffd8ff"), bytes.fromhex("89504e470d0a1a0a"))):
+                return {"image": base64.b64encode(data).decode("ascii")}
+            try:
+                url = json.loads(data)["redirect"]
+                if not isinstance(url, str):
                     break
-                data = reader(principal, url)
-                if data is None:
-                    return {}
-                if data.startswith((bytes.fromhex("ffd8ff"), bytes.fromhex("89504e470d0a1a0a"))):
-                    return {"image": base64.b64encode(data).decode("ascii")}
-                try:
-                    url = json.loads(data)["redirect"]
-                    if not isinstance(url, str):
-                        break
-                except KeyError, TypeError, ValueError:
-                    break
-            raise MetadataProviderError("metadata_artwork_invalid", retryable=False)
+            except (KeyError, TypeError, ValueError):
+                break
+        raise MetadataProviderError("metadata_artwork_invalid", retryable=False)
 
+    def _public_document(self, principal: Principal, url: str) -> dict:
+        assert self.read_public is not None
+        data = self.read_public(principal, url)
+        if data is None:
+            return {}
         try:
-            saved = cache.read(f"coverartarchive:front-250:{release}", refresh).get("image")
+            value = json.loads(data)
+            if isinstance(value, dict):
+                return value
+        except ValueError:
+            pass
+        raise MetadataProviderError("metadata_response_invalid", retryable=False)
+
+    def _cached_image(self, key: str, refresh: Callable[[], dict[str, object]]) -> bytes:
+        if self.read_public is None or self.page_cache is None:
+            raise MusicError("catalog_cover_missing", "Image unavailable.", 404)
+        try:
+            saved = self.page_cache.read(key, refresh).get("image")
         except MetadataProviderError as exc:
-            raise MusicError(
-                "catalog_cover_unavailable",
-                "Cover temporarily unavailable.",
-                503,
-                retryable=exc.retryable,
-            ) from exc
+            raise MusicError("catalog_cover_unavailable", "Image temporarily unavailable.", 503,
+                             retryable=exc.retryable) from exc
         if not isinstance(saved, str):
-            raise MusicError("catalog_cover_missing", "Cover unavailable.", 404)
+            raise MusicError("catalog_cover_missing", "Image unavailable.", 404)
         return base64.b64decode(saved, validate=True)
+
+    def release_cover(self, principal: Principal, release: UUID) -> bytes:
+        def refresh() -> dict[str, object]:
+            if image := self._image(principal, f"https://coverartarchive.org/release/{release}/front-500"):
+                return image
+            doc = self._public_document(principal, f"https://musicbrainz.org/ws/2/release/{release}?inc=release-groups&fmt=json")
+            group = doc.get("release-group")
+            if doc.get("id") != str(release) or not isinstance(group, dict):
+                return {}
+            try:
+                identity = UUID(str(group.get("id")))
+            except ValueError:
+                return {}
+            return self._image(principal, f"https://coverartarchive.org/release-group/{identity}/front-500")
+
+        return self._cached_image(f"coverartarchive:front-500:{release}", refresh)
+
+    def artist_portrait(self, principal: Principal, artist: UUID) -> bytes:
+        def refresh() -> dict[str, object]:
+            doc = self._public_document(principal, f"https://musicbrainz.org/ws/2/artist/{artist}?inc=url-rels&fmt=json")
+            if doc.get("id") != str(artist):
+                return {}
+            ids = set()
+            relations = doc.get("relations", [])
+            if not isinstance(relations, list):
+                raise MetadataProviderError("metadata_response_invalid", retryable=False)
+            for relation in relations:
+                if not isinstance(relation, dict) or not isinstance(relation.get("url"), dict) or relation.get("ended"):
+                    continue
+                try:
+                    link = urlsplit(str(relation["url"].get("resource", "")))
+                except ValueError:
+                    continue
+                match = re.fullmatch(r"/(?:[a-z]{2}/)?artist/([1-9][0-9]{0,16})/?", link.path)
+                if link.scheme in {"https", "http"} and link.netloc in {"deezer.com", "www.deezer.com"} and match:
+                    ids.add(match[1])
+            if len(ids) != 1:
+                return {}
+            identity = ids.pop()
+            entry = self._public_document(principal, f"https://api.deezer.com/artist/{identity}")
+            photo = image_url(entry.get("picture_big"), "artist")
+            if str(entry.get("id")) != identity or not photo:
+                return {}
+            return self._image(principal, photo)
+
+        return self._cached_image(f"musicbrainz:artist-portrait:{artist}", refresh)
 
     def artist_ranking(self, principal: Principal, artist: UUID) -> dict[str, object]:
         empty: dict[str, object] = {"source": "ListenBrainz", "counts": {}}
@@ -143,6 +202,73 @@ class MusicDiscoveryService:
             offset,
             lambda provider: provider.search(query, kind, limit=limit, offset=offset),
         )
+
+    def artist_overview(
+        self,
+        principal: Principal,
+        artist: UUID,
+        schedule: Callable[[Callable[[], None]], None],
+        known_baseline: UUID | None = None,
+    ) -> dict[str, object]:
+        cache = self.page_cache
+        key = f"musicbrainz:artist-overview-v1:{artist}"
+
+        def refresh(previous: dict[str, object] | None) -> dict[str, object]:
+            now = datetime.now(UTC)
+            try:
+                with self.provider_factory(principal) as provider:
+                    updated = build_artist_overview(provider, artist, previous, now.date())
+                updated.pop("retry_at", None)
+                return updated
+            except MetadataProviderError:
+                if previous is None:
+                    raise
+                return {**previous, "retry_at": (now + timedelta(minutes=5)).isoformat()}
+
+        def pending(doc: dict[str, object]) -> bool:
+            if isinstance(retry_at := doc.get("retry_at"), str):
+                return datetime.now(UTC) >= datetime.fromisoformat(retry_at)
+            return doc.get("delta_offset") is not None
+
+        def update_saved() -> None:
+            assert cache is not None
+            # Commit each provider page separately. Another worker can continue from that cursor.
+            prior_cursor: object = -1
+            for _ in range(4):
+                try:
+                    updated = cache.update(key, refresh, pending=pending)
+                except MetadataProviderError:
+                    return
+                cursor = updated.get("delta_offset")
+                if cursor is None or cursor == prior_cursor or "retry_at" in updated:
+                    return
+                prior_cursor = cursor
+
+        try:
+            saved = cache.saved(key) if cache is not None else None
+            if saved is None:
+                data = cache.update(key, refresh) if cache is not None else refresh(None)
+                due = pending(data)
+            else:
+                data, observed = saved
+                due = pending(data) or datetime.now(UTC) - observed >= timedelta(hours=12)
+            if due and cache is not None:
+                schedule(update_saved)
+            return {
+                **artist_overview_view(data, known_baseline),
+                "artist_mbid": str(artist),
+                "library_artist_id": (
+                    cache.library_artist_id(principal.user_id, artist) if cache is not None else None
+                ),
+                "refreshing": due and cache is not None,
+            }
+        except MetadataProviderError as exc:
+            raise MusicError(
+                "music_discovery_unavailable",
+                "Artist overview is unavailable.",
+                503,
+                retryable=exc.retryable,
+            ) from exc
 
     def artist_releases(
         self,

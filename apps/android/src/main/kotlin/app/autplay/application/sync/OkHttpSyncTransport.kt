@@ -88,9 +88,9 @@ class OkHttpSyncTransport(
         val url = baseUrl.trimEnd('/').plus("/sync/pull").toHttpUrl().newBuilder()
             .addQueryParameter("protocol_version", "1").addQueryParameter("device_id", binding.deviceId.value)
             .addQueryParameter("server_profile_id", binding.serverProfileId.value).addQueryParameter("journal_epoch", binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED"))
-            .addQueryParameter("limit", "100")
+            .addQueryParameter("limit", PULL_BATCH_LIMIT.toString())
             .addQueryParameter("catalog_projection_version", "1")
-            .addQueryParameter("capabilities", "$CATALOG_ARTIST_ID_CAPABILITY,CATALOG_EDITION_V1,PERSONAL_LIBRARY_V1")
+            .addQueryParameter("capabilities", "$CATALOG_ARTIST_ID_CAPABILITY,CATALOG_EDITION_V1,PERSONAL_LIBRARY_V1,PERSONAL_LIBRARY_V2")
             .apply { cursor?.let { addQueryParameter("cursor", it) } }.build()
         val root = execute(binding.serverProfileId, url.toString(), null).jsonObject
         return PullPage(root["next_cursor"]!!.jsonPrimitive.content, root["has_more"]!!.jsonPrimitive.boolean, events(root["events"]!!.jsonArray), root["personal_library_version"]?.jsonPrimitive?.int ?: 0)
@@ -98,7 +98,7 @@ class OkHttpSyncTransport(
 
     override suspend fun bootstrap(binding: ClientEventBinding, snapshotId: String?, pageToken: String?, pendingCount: Int): BootstrapPage {
         require(pendingCount in 0..100_000)
-        val payload = "{\"protocol_version\":1,\"device_id\":\"${binding.deviceId.value}\",\"server_profile_id\":\"${binding.serverProfileId.value}\",\"journal_epoch\":\"${binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED")}\",\"reason\":\"FIRST_SYNC\",\"snapshot_id\":${snapshotId?.let { "\"$it\"" } ?: "null"},\"page_token\":${pageToken?.let { "\"$it\"" } ?: "null"},\"pending_local_event_count\":$pendingCount,\"catalog_projection_version\":1,\"capabilities\":[\"$CATALOG_ARTIST_ID_CAPABILITY\",\"CATALOG_EDITION_V1\",\"PERSONAL_LIBRARY_V1\"]}"
+        val payload = "{\"protocol_version\":1,\"device_id\":\"${binding.deviceId.value}\",\"server_profile_id\":\"${binding.serverProfileId.value}\",\"journal_epoch\":\"${binding.journalEpoch?.value ?: error("JOURNAL_EPOCH_REQUIRED")}\",\"reason\":\"FIRST_SYNC\",\"snapshot_id\":${snapshotId?.let { "\"$it\"" } ?: "null"},\"page_token\":${pageToken?.let { "\"$it\"" } ?: "null"},\"pending_local_event_count\":$pendingCount,\"catalog_projection_version\":1,\"capabilities\":[\"$CATALOG_ARTIST_ID_CAPABILITY\",\"CATALOG_EDITION_V1\",\"PERSONAL_LIBRARY_V1\",\"PERSONAL_LIBRARY_V2\"]}"
         val root = execute(
             binding.serverProfileId,
             "/sync/bootstrap",
@@ -177,6 +177,7 @@ class OkHttpSyncTransport(
 
     private fun events(items: JsonArray) = items.map { item -> item.jsonObject.let { value -> RemoteEvent(value["event_id"]!!.jsonPrimitive.content, value["server_sequence"]!!.jsonPrimitive.long, value["event_type"]!!.jsonPrimitive.content, value["schema_version"]!!.jsonPrimitive.int, value["payload"]!!.toString(), value["aggregate_type"]!!.jsonPrimitive.content, value["aggregate_server_id"]?.jsonPrimitive?.contentOrNull, value["server_row_version"]?.jsonPrimitive?.longOrNull, value["operation"]!!.jsonPrimitive.content, value["tombstone"]?.jsonObject?.get("tombstone_id")?.jsonPrimitive?.content, value["tombstone"]?.jsonObject?.get("retain_until")?.jsonPrimitive?.contentOrNull?.let(::instantMs), value["redirect"]?.jsonObject?.get("canonical_server_id")?.jsonPrimitive?.content, value["created_at"]?.jsonPrimitive?.contentOrNull?.let(::instantMs)) } }
     private fun eventTypeFor(type: String) = when (type) {
+        "USER_TRACK_PREFERENCE" -> "USER_TRACK_PREFERENCE_SET"
         "USER_TRACK_REF" -> "USER_TRACK_REF_CREATED"
         "LIBRARY_ENTRY" -> "LIBRARY_ENTRY_UPSERTED"
         "PLAYLIST" -> "PLAYLIST_CREATED"

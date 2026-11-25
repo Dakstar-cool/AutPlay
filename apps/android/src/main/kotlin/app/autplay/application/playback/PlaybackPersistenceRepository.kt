@@ -4,6 +4,7 @@ import androidx.room3.withWriteTransaction
 import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.application.library.SliceMutationResult
 import app.autplay.application.recommendation.OfflineRecommendationRepository
+import app.autplay.application.recommendation.selectSongRefs
 import app.autplay.application.recommendation.PersonalWaveSession
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.application.sync.P07PayloadCodec
@@ -155,6 +156,37 @@ class PlaybackPersistenceRepository(
         }
         return RestoredPlaybackQueue(snapshot, entries, media)
     }
+
+    internal suspend fun extendWave(snapshotId: String, lastEntry: String, size: Int,
+                                    binding: ClientEventBinding?, online: Boolean): List<QueueEntryEntity> =
+        database.withWriteTransaction {
+            val dao = database.queueDao()
+            val snapshot = dao.activeSnapshotOnce() ?: return@withWriteTransaction emptyList()
+            if (snapshot.queueSnapshotId != snapshotId || snapshot.queueType != "USER" ||
+                snapshot.serverProfileId != binding?.serverProfileId?.value || size >= MAX_QUEUE_ENTRIES)
+                return@withWriteTransaction emptyList()
+            val owner = binding?.let {
+                val cursor = database.syncDao().cursor(it.serverProfileId.value)
+                if (cursor?.deviceId != it.deviceId.value) return@withWriteTransaction emptyList()
+                it.copy(journalEpoch = LocalId(cursor.journalEpoch))
+            }
+            if (PersonalWaveSession.restore(snapshot.sourceContextId, owner) == null ||
+                dao.entries(snapshotId, MAX_QUEUE_ENTRIES).lastOrNull()?.queueEntryId != lastEntry)
+                return@withWriteTransaction emptyList()
+            val profile = snapshot.serverProfileId ?: "legacy-unscoped"
+            val library = database.libraryDao()
+            val candidates = library.playbackCandidates(profile, owner != null && online, 200, excludeSnapshot = snapshotId)
+            val now = System.currentTimeMillis()
+            val tracks = library.selectSongRefs(profile, candidates, now, wave = true)
+            val ids = library.waveRecordings(profile, tracks).associateBy { it.refId }
+            val additions = tracks.distinctBy { ids[it]?.catalogRecordingId ?: it }
+                .take(minOf(20, MAX_QUEUE_ENTRIES - size)).mapIndexed { index, track ->
+                    QueueEntryEntity(LocalId.random().value, snapshotId, track, (size + index).toLong(),
+                        "WAVE", null, "LOCAL_THEN_VAULT", now)
+                }
+            if (additions.isNotEmpty()) dao.insertEntries(additions)
+            additions
+        }
 
     suspend fun startSession(
         entryId: LocalId,

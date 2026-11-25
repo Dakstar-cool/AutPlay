@@ -149,7 +149,7 @@ def test_any_retained_v2_stage_blocks_downgrade_before_any_drop(
         == commands
     )
     assert database_connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-        "0078_playlist_snapshots",
+        "0079_music_preservation",
     )
 
 
@@ -506,5 +506,5 @@ def test_downgrade_preflight_catches_partial_legacy_labelled_fields_in_each_tabl
         database_harness.downgrade(database_name, "0071_device_admission_v2")
     assert snapshot_schema(database_connection) == before
     assert database_connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-        "0078_playlist_snapshots",
+        "0079_music_preservation",
     )

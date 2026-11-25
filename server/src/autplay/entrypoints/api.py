@@ -704,6 +704,7 @@ def create_app(
                 create_acquisition_control_router(
                     web=web,
                     acquisition=acquisition,
+                    preservation_sessions=sessionmaker(engine, expire_on_commit=False),
                     renderer=admin_renderer or AdminTemplateRenderer(),
                     origin=origin,
                     discovery_enabled=discovery is not None,

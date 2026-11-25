@@ -215,6 +215,7 @@ data class HomeFeed(
     val statusCode: String,
     val recommendationSections: Map<String, List<HomeRecommendationItem>>,
     val recentRelevantReleases: List<RecentRelevantReleaseRow>,
+    val releaseArtists: Set<String> = emptySet(),
 )
 
 fun interface PresentationFailureInjector {
@@ -270,11 +271,6 @@ class OfflineRecommendationRepository(
         val decoded = fresh ?: stored.firstNotNullOfOrNull { entity ->
             decodeOrNull(entity, binding, nowMs, OfflinePackExpiryPolicy.AllowStaleLocalOnly(HOME_STALE_FALLBACK_MS))
         }
-        val releases = dao.recentRelevantReleases(
-            binding.serverProfileId.value,
-            binding.userId.value,
-            MAX_RECENT_RELEASES,
-        )
         if (decoded == null || decoded.items.isEmpty()) {
             return@withWriteTransaction HomeFeed(
                 binding.serverProfileId.value,
@@ -285,7 +281,7 @@ class OfflineRecommendationRepository(
                 false,
                 "NO_USABLE_OFFLINE_PACK",
                 emptyMap(),
-                releases,
+                emptyList(),
             )
         }
 
@@ -319,6 +315,12 @@ class OfflineRecommendationRepository(
             loadOrCreateDelta(parentEntity, decoded, binding, baseItems, nowMs)
         }
         val sections = ranked.groupBy(HomeRecommendationItem::sectionKey)
+        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        val artists = recommendedReleaseArtists(ranked, dao.releaseArtistActivity(
+            binding.serverProfileId.value, nowMs - 30L * 86_400_000, nowMs))
+        val releases = if (artists.isEmpty()) emptyList() else dao.recentRelevantReleases(
+            binding.serverProfileId.value, binding.userId.value, today.minusDays(6).toString(), today.toString(),
+        ).filter { isWeeklyArtistRelease(it.artist, it.releaseDateText, artists, today) }
         val status = when {
             ranked.isEmpty() -> "NO_LOCALLY_AVAILABLE_RECOMMENDATIONS"
             decoded.isStale -> "STALE_LOCAL_FALLBACK"
@@ -335,6 +337,7 @@ class OfflineRecommendationRepository(
             statusCode = status,
             recommendationSections = sections,
             recentRelevantReleases = releases,
+            releaseArtists = artists,
         )
     }
 
@@ -850,7 +853,6 @@ class OfflineRecommendationRepository(
 
     private companion object {
         const val MAX_PACK_CANDIDATES = 5
-        const val MAX_RECENT_RELEASES = 12
         const val HOME_STALE_FALLBACK_MS = 24L * 60 * 60 * 1000
     }
 }

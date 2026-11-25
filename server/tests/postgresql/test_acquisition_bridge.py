@@ -16,6 +16,7 @@ import pytest
 from autplay.adapters.filesystem.vault import FilesystemVaultStorage
 from autplay.adapters.postgresql.jobs_uow import SqlAlchemyJobUnitOfWorkFactory
 from autplay.adapters.postgresql.models import (
+    CatalogBrowsePageRow,
     DeviceRow,
     LibraryEntryRow,
     SyncEventRow,
@@ -81,13 +82,13 @@ def test_receipt_replay_publishes_one_playable_entry(
                 "sha256": hashlib.sha256(payload).hexdigest(),
                 "bytes": len(payload),
                 "duration_seconds": 2,
-                "item": {"title": "Song", "artist": "Artist", "album": None},
+                "item": {"title": "Artist_-_Quiet_Song.mp3", "artist": "Artist", "album": None},
                 "source_metadata": {
                     "schema_version": 1,
                     "provider": "JAMENDO",
                     "source_id": "123",
                     "fields": {
-                        "title": "Song",
+                        "title": "Quiet Song",
                         "artist": "Artist",
                         "album": "Source Album",
                         "release_date": "2020",
@@ -154,6 +155,10 @@ def test_receipt_replay_publishes_one_playable_entry(
             for key in ("import_id", "recording_id", "ref_id", "upload_id", "variant_id"):
                 if key in checkpoint:
                     assert replay[key] == checkpoint[key]
+            if checkpoint["state"] == "UPLOADING":
+                with backend.sessions() as session:
+                    row = session.get(TrackMetadataRow, UUID(checkpoint["ref_id"]))
+                    assert row is not None and row.document["fields"]["title"] == "Quiet Song"
             worker.run_once()
             if checkpoint["state"] == "PUBLISHED":
                 break
@@ -181,11 +186,16 @@ def test_receipt_replay_publishes_one_playable_entry(
             assert len(published) == 1
             assert published[0].payload["server_user_track_ref_id"] == checkpoint["ref_id"]
             assert published[0].payload["availability_status"] == "VAULT"
+            card = session.get(CatalogBrowsePageRow, "vault-display-v1:" + checkpoint["recording_id"])
+            assert card is not None and card.document["title"] == "Quiet Song"
+            assert card.document["source_title"] == "Artist_-_Quiet_Song.mp3"
             metadata = session.get(TrackMetadataRow, UUID(checkpoint["ref_id"]))
             assert metadata is not None
             assert metadata.document["acquisition_evidence"] == receipt.source_metadata
+            assert metadata.document["fields"]["title"] == "Quiet Song"
+            assert metadata.document["provenance"]["title"]["source"] == "SOURCE_NATIVE"
             metadata_identity = (metadata.revision, metadata.generation, metadata.job_id)
-            assert session.scalar(select(func.count()).select_from(TrackMetadataRevisionRow)) == 1
+            assert session.scalar(select(func.count()).select_from(TrackMetadataRevisionRow)) == 2
         # Commit succeeded but its local acknowledgment was lost: concurrent replay is one command.
         missing_ack = {
             key: value for key, value in checkpoint.items() if not key.startswith("metadata_")
@@ -204,7 +214,7 @@ def test_receipt_replay_publishes_one_playable_entry(
             metadata = session.get(TrackMetadataRow, UUID(checkpoint["ref_id"]))
             assert metadata is not None
             assert (metadata.revision, metadata.generation, metadata.job_id) == metadata_identity
-            assert session.scalar(select(func.count()).select_from(TrackMetadataRevisionRow)) == 1
+            assert session.scalar(select(func.count()).select_from(TrackMetadataRevisionRow)) == 2
         # A richer source receipt updates only metadata; audio/import/library identity stays fixed.
         changed_doc = json.loads(receipt_path.read_text())
         changed_doc["source_metadata"]["fields"]["album"] = "Other Edition"
@@ -225,7 +235,7 @@ def test_receipt_replay_publishes_one_playable_entry(
             assert metadata.document["acquisition_refresh_pending"] is True
             assert metadata.generation == metadata_identity[1]
             assert session.scalar(select(func.count()).select_from(LibraryEntryRow)) == 1
-            assert session.scalar(select(func.count()).select_from(TrackMetadataRevisionRow)) == 2
+            assert session.scalar(select(func.count()).select_from(TrackMetadataRevisionRow)) == 3
         # Tampered completed bytes never enter import or upload.
         (audio_dir / "sample.flac").write_bytes(b"x" * len(payload))
         with pytest.raises(bridge.ReceiptError, match="integrity_mismatch"):

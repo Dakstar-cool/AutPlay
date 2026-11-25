@@ -45,9 +45,7 @@ internal fun HomeReleaseSection(releases: List<HomeReleaseUiItem>, onOpenRelease
     var showAll by rememberSaveable { mutableStateOf(false) }
     val title = stringResource(R.string.home_release_feed_title)
     Column(Modifier.testTag("home-releases-section"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, Modifier.weight(1f).semantics { heading() },
-                style = MaterialTheme.typography.titleLarge)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = { showAll = true }, modifier = Modifier.testTag("home-releases-all")) {
                 Text(stringResource(R.string.home_release_feed_all))
             }
@@ -64,6 +62,7 @@ internal fun HomeReleaseSection(releases: List<HomeReleaseUiItem>, onOpenRelease
                     CollectionCoverTile(
                         title = release.title,
                         artworkTrackId = release.artworkTrackId,
+                        catalogCoverId = release.releaseMbid,
                         subtitle = release.artist,
                         caption = release.dateText?.takeIf { it.isNotBlank() },
                         modifier = Modifier.width(coverWidth).testTag("home-release:${release.id}"),

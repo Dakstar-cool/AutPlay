@@ -1,5 +1,7 @@
 package app.autplay.application.server
 
+import app.autplay.application.library.PlaylistImportFile
+import app.autplay.application.library.SharedPlaylist
 import app.autplay.application.recommendation.PersonalWaveSession
 import app.autplay.application.recommendation.LIKED_ORIGINAL_VERSION
 import app.autplay.data.security.CredentialStore
@@ -227,6 +229,12 @@ class ServerFeatureRepository(
             expectBody = true, binary = true).bytes)
     }
 
+    suspend fun catalogArtistPortrait(id: String): ByteArray {
+        catalogueUuid(id)
+        return checkNotNull(authorizedRaw(Request.Builder().url("$apiBaseUrl/music/discovery/artists/$id/portrait").get().build(),
+            expectBody = true, binary = true).bytes)
+    }
+
     suspend fun metadataArtwork(refId: String, sha: String): ByteArray {
         requireUuidLike(refId)
         require(SHA256_REGEX.matches(sha))
@@ -273,6 +281,26 @@ class ServerFeatureRepository(
         val result = musicPost("/playlist-shares", snapshot)
         val token = java.util.UUID.fromString(result.getValue("token").jsonPrimitive.content)
         return "$apiBaseUrl/playlist-shares/$token"
+    }
+
+    suspend fun openPlaylistLink(value: String): PlaylistImportFile {
+        val url = value.trim().toHttpUrl()
+        val configured = apiBaseUrl.toHttpUrl()
+        val sameServer = url.scheme == configured.scheme && url.host == configured.host && url.port == configured.port
+        require((sameServer || url.isHttps) && url.username.isEmpty() && url.password.isEmpty() &&
+            url.query == null && url.fragment == null)
+        val path = url.encodedPath.trimEnd('/').removeSuffix("/file")
+        val token = java.util.UUID.fromString(path.substringAfterLast('/')).toString()
+        require(path.endsWith("/api/v1/playlist-shares/$token"))
+        val document = client.newCall(Request.Builder().url(url.newBuilder().encodedPath("$path/file").build())
+            .get().build()).readCancellable { response ->
+            require(response.isSuccessful)
+            SharedPlaylist.decode(response.body.readBoundedBytes(SharedPlaylist.MAX_FILE_BYTES))
+        }
+        require(document.token == token)
+        val copy = PlaylistImportFile(document)
+        return if (sameServer && path == configured.encodedPath + "/playlist-shares/$token") copy
+            else copy.copy(shareToken = null, tracks = copy.tracks.map { it.copy(recordingId = null) })
     }
 
     private suspend fun musicPost(path: String, body: JsonObject): JsonObject = authorized(Request.Builder()
@@ -325,6 +353,13 @@ class ServerFeatureRepository(
             "start", "advance" -> musicPost("$path/$action", buildJsonObject {})
             else -> error("Unknown catalogue operation")
         }
+    }
+
+    suspend fun artistOverview(artistId: String, baseline: String?): JsonObject {
+        catalogueUuid(artistId)
+        val url = "$apiBaseUrl/music/discovery/artists/$artistId/overview".toHttpUrl().newBuilder()
+        if (baseline != null) url.addQueryParameter("baseline", catalogueUuid(baseline))
+        return authorized(Request.Builder().url(url.build()).get().build()).jsonObject
     }
 
     suspend fun artistRanking(artistId: String): JsonObject {

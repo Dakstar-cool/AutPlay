@@ -133,7 +133,7 @@ class PlaybackPresentationPolicyTest {
         assertEquals(listOf(500L), port.seekPositions)
         assertEquals(1, port.playCalls)
         assertTrue(port.shuffleModeEnabled)
-        assertEquals(Player.REPEAT_MODE_ALL, port.repeatMode)
+        assertEquals(1, port.repeatCalls)
     }
 
     @Test
@@ -192,11 +192,7 @@ class PlaybackPresentationPolicyTest {
                 field = value
                 shuffleCalls += 1
             }
-        override var repeatMode: Int = Player.REPEAT_MODE_OFF
-            set(value) {
-                field = value
-                repeatCalls += 1
-            }
+        override fun cycleTrackRepeat(entry: String) { repeatCalls++ }
 
         val seekPositions = mutableListOf<Long>()
         var playCalls = 0

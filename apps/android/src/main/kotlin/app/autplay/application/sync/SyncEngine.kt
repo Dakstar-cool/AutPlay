@@ -79,6 +79,8 @@ interface SyncTransport {
 class InvalidCursorException : IllegalStateException("CURSOR_INVALID")
 class InvalidBootstrapSnapshotException : IllegalStateException("BOOTSTRAP_SNAPSHOT_INVALID")
 
+internal const val PULL_BATCH_LIMIT = 500
+
 /**
  * P09 local coordinator. Leasing and every cursor advance are Room transactions; network calls are
  * deliberately outside them so a process death can only replay immutable event IDs.
@@ -234,17 +236,25 @@ class SyncCoordinator(
 
     private suspend fun pull(binding: ClientEventBinding, cursor: SyncCursorEntity): DrainOutcome {
         val page = try {
-            transport.pull(binding, cursor.opaqueCursor).also {
-                if (it.personalLibraryVersion >= 1 && cursor.personalLibraryVersion < 1) throw InvalidCursorException()
-            }
+            transport.pull(binding, cursor.opaqueCursor)
         } catch (_: InvalidCursorException) {
-            database.withWriteTransaction {
-                database.syncDao().upsertCursor(cursor.copy(bootstrapState = "RESET_REQUIRED", updatedAtMs = nowMs()))
-                database.syncDao().upsertBootstrapState(SyncBootstrapStateEntity(binding.serverProfileId.value, null, null, null, "RESET_REQUIRED", nowMs()))
-            }
+            resetSnapshot(cursor)
             return DrainOutcome(false, false)
-        } catch (error: Exception) { throw error }
+        }
+        if (minOf(2, page.personalLibraryVersion) > cursor.personalLibraryVersion) {
+            resetSnapshot(cursor)
+            return DrainOutcome(true, true)
+        }
         return DrainOutcome(applyPage(binding, cursor, page), page.hasMore)
+    }
+
+    private suspend fun resetSnapshot(cursor: SyncCursorEntity) {
+        database.withWriteTransaction {
+            database.syncDao().upsertCursor(cursor.copy(bootstrapState = "RESET_REQUIRED", updatedAtMs = nowMs()))
+            database.syncDao().upsertBootstrapState(SyncBootstrapStateEntity(
+                cursor.serverProfileId, null, null, null, "RESET_REQUIRED", nowMs(),
+            ))
+        }
     }
 
     private suspend fun bootstrap(binding: ClientEventBinding, cursor: SyncCursorEntity): DrainOutcome {
@@ -281,7 +291,7 @@ class SyncCoordinator(
                 if (page.hasMore) "BOOTSTRAPPING" else "READY", nowMs(),
             ))
             database.syncDao().upsertCursor(cursor.copy(
-                personalLibraryVersion = if (page.hasMore) cursor.personalLibraryVersion else minOf(1, page.personalLibraryVersion),
+                personalLibraryVersion = if (page.hasMore) cursor.personalLibraryVersion else minOf(2, page.personalLibraryVersion),
                 // Incremental cursor is untouched until the final snapshot cutover.
                 opaqueCursor = if (page.hasMore) cursor.opaqueCursor else page.snapshotCursor,
                 bootstrapSnapshotId = page.snapshotId,
@@ -291,7 +301,8 @@ class SyncCoordinator(
             ))
             true
         }
-        return DrainOutcome(applied, applied && page.hasMore)
+        // Drain events committed after the snapshot high-water before declaring sync complete.
+        return DrainOutcome(applied, applied && (page.hasMore || page.personalLibraryVersion >= 2))
     }
 
     private suspend fun applyPage(binding: ClientEventBinding, cursor: SyncCursorEntity, page: PullPage): Boolean {
@@ -330,7 +341,7 @@ class SyncCoordinator(
                 }
             }
         }
-        return ids.isNotEmpty() && database.journalDao().hasUnacknowledgedCreate(cursor.journalLineageId, ids.toList())
+        return ids.chunked(500).any { database.journalDao().hasUnacknowledgedCreate(cursor.journalLineageId, it) }
     }
 
     /** Unknown schema/type survives as deferred evidence; known event application is idempotent. */
@@ -343,12 +354,8 @@ class SyncCoordinator(
                 require(event.sequence > previous) { "SERVER_SEQUENCE_NOT_ASCENDING" }
                 previous = event.sequence
             }
-            if (event.sequence == 0L && event.aggregateType == "LIBRARY_ENTRY" && event.aggregateServerId != null) {
-                payloadBoolean(event.payloadJson, "personal_save")?.let {
-                    database.libraryDao().setPersonalSave(binding.serverProfileId.value, event.aggregateServerId, it)
-                }
-            }
-            if (database.syncDao().isServerEventKnown(binding.serverProfileId.value, event.eventId)) return@forEach
+            // Snapshot IDs identify aggregates. A track and its preference can have the same ID.
+            if (event.sequence > 0 && database.syncDao().isServerEventKnown(binding.serverProfileId.value, event.eventId)) return@forEach
             if (isProjectionSupported(event)) {
                 check(applyProjection(binding, event)) { "PROJECTION_INCOMPLETE" }
                 if (event.sequence > 0) database.syncDao().markApplied(AppliedServerEventEntity(binding.serverProfileId.value, event.eventId, event.sequence, nowMs()))
@@ -367,7 +374,9 @@ class SyncCoordinator(
             database.syncDao().insertInteractionFact(app.autplay.data.local.entity.RecommendationInteractionFactEntity(binding.serverProfileId.value, event.eventId, event.eventType, event.payloadJson, nowMs()))
             return true
         }
-        if (event.eventType == "USER_TRACK_PREFERENCE_SET") return applyPreferenceProjection(binding, event)
+        if (event.eventType == "USER_TRACK_PREFERENCE_SET" || event.eventType == "PORTABLE_TRACK_PREFERENCE_PROJECTED") {
+            return applyPreferenceProjection(binding, event)
+        }
         if (event.eventType == "LISTENING_EVENT_RECORDED") return applyListeningProjection(binding, event)
         val serverId = event.aggregateServerId ?: return false
         val profile = binding.serverProfileId.value
@@ -573,6 +582,9 @@ class SyncCoordinator(
         // A duplicate replay must apply exactly the original terminal outcome, never manufacture a second projection.
         if (ack.outcome == "DUPLICATE" && ack.originalOutcome !in setOf("APPLIED", null)) return
         when (type) {
+            "USER_TRACK_PREFERENCE" -> database.libraryDao().preference(local)?.takeIf {
+                it.serverProfileId == binding.serverProfileId.value && it.lastLocalSequence == event.deviceSequence
+            }?.let { database.libraryDao().upsertPreference(it.copy(syncState = "CLEAN")) }
             "USER_TRACK_REF" -> database.libraryDao().trackRef(local)?.let { database.libraryDao().upsertTrackRef(it.copy(serverUserTrackRefId = server ?: it.serverUserTrackRefId, serverRowVersion = ack.serverRowVersion ?: it.serverRowVersion, syncState = "CLEAN", serverProfileId = binding.serverProfileId.value)) }
             "LIBRARY_ENTRY" -> database.libraryDao().entry(local)?.let { database.libraryDao().upsertEntry(it.copy(serverLibraryEntryId = server ?: it.serverLibraryEntryId, serverRowVersion = ack.serverRowVersion ?: it.serverRowVersion, syncState = "CLEAN", serverProfileId = binding.serverProfileId.value)) }
             "PLAYLIST" -> database.playlistDao().playlist(local)?.let { database.playlistDao().upsertPlaylist(it.copy(serverPlaylistId = server ?: it.serverPlaylistId, serverRowVersion = ack.serverRowVersion ?: it.serverRowVersion, syncState = "CLEAN", serverProfileId = binding.serverProfileId.value)) }
@@ -746,10 +758,38 @@ class SyncCoordinator(
         }
     }
     private suspend fun applyPreferenceProjection(binding: ClientEventBinding, event: RemoteEvent): Boolean {
-        val track = payloadString(event.payloadJson, "local_user_track_ref_id") ?: return false
-        if (database.libraryDao().trackRef(track)?.serverProfileId != binding.serverProfileId.value) return false
+        val library = database.libraryDao()
+        val profile = binding.serverProfileId.value
+        val canonical = payloadString(event.payloadJson, "server_user_track_ref_id")
+        val originLocal = payloadString(event.payloadJson, "local_user_track_ref_id")
+        val track = if (canonical == null) {
+            originLocal?.let {
+                library.trackRef(it)?.takeIf { ref -> ref.serverProfileId == profile }?.localUserTrackRefId
+                    ?: library.trackRefByServerId(profile, it)?.localUserTrackRefId
+            }
+        } else {
+            library.trackRefByServerId(profile, canonical)?.localUserTrackRefId ?: run {
+                if (event.eventType != "PORTABLE_TRACK_PREFERENCE_PROJECTED" || event.aggregateServerId != canonical) return false
+                val parent = event.copy(aggregateType = "USER_TRACK_REF", eventType = "USER_TRACK_REF_PATCHED", serverRowVersion = null)
+                val local = adoptServerAggregate(binding, parent) ?: return false
+                if (!applyPayloadProjection("USER_TRACK_REF", local, event.payloadJson)) return false
+                local
+            }
+        } ?: return false
+        val existing = library.preference(track)
+        if (existing?.syncState == "DIRTY") {
+            // Older clients left an already acknowledged preference marked dirty.
+            val cursor = requireCursor(binding)
+            if (!database.journalDao().preferenceWasAcknowledged(
+                    cursor.journalLineageId, track, existing.lastLocalSequence,
+                )) return true
+        }
         val preference = payloadString(event.payloadJson, "preference") ?: return false
-        database.libraryDao().upsertPreference(app.autplay.data.local.entity.UserTrackPreferenceEntity(track, preference, null, payloadBoolean(event.payloadJson, "excluded_from_taste") ?: false, "CLEAN", 0, nowMs(), binding.serverProfileId.value))
+        library.upsertPreference(app.autplay.data.local.entity.UserTrackPreferenceEntity(
+            track, preference, payloadLong(event.payloadJson, "rating")?.toInt(),
+            payloadBoolean(event.payloadJson, "excluded_from_taste") ?: false, "CLEAN", existing?.lastLocalSequence ?: 0,
+            payloadLong(event.payloadJson, "updated_at_ms") ?: event.publishedAtMs ?: nowMs(), profile,
+        ))
         return true
     }
     private suspend fun applyListeningProjection(binding: ClientEventBinding, event: RemoteEvent): Boolean {
@@ -806,7 +846,6 @@ class SyncCoordinator(
         const val MAX_DRAIN_PAGES = 10
         const val MAX_PUSH_DRAIN_BATCHES = 5
         const val PUSH_BATCH_LIMIT = 100
-        const val PULL_BATCH_LIMIT = 500
         const val LEASE_MS = 60_000L
         const val BASE_BACKOFF_MS = 1_000L
         const val MAX_BACKOFF_MS = 3_600_000L
@@ -818,7 +857,7 @@ class SyncCoordinator(
         const val MAX_OWNER_RECORDING_PAGE = 100
         val OWNER_SCOPE_PATTERN = Regex("^[a-f0-9]{64}$")
         val CATALOG_ARTIST_EVENT_TYPES = setOf("CATALOG_EDITION_TRACK_UPSERTED", "CATALOG_ARTIST_UPSERTED", "CATALOG_ARTIST_CREDIT_UPSERTED", "CATALOG_RECORDING_CREDIT_LINK_UPSERTED", "CATALOG_RELEASE_CREDIT_LINK_UPSERTED")
-        val KNOWN_EVENT_TYPES = setOf("USER_TRACK_REF_CREATED", "USER_TRACK_REF_PATCHED", "LIBRARY_ENTRY_UPSERTED", "USER_TRACK_PREFERENCE_SET", "PLAYLIST_CREATED", "PLAYLIST_METADATA_PATCHED", "PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY_MOVED", "AGGREGATE_DELETED", "AGGREGATE_REDIRECT", "LISTENING_EVENT_RECORDED", "RECOMMENDATION_IMPRESSION_RECORDED", "RECOMMENDATION_FEEDBACK_RECORDED") + CATALOG_ARTIST_EVENT_TYPES
+        val KNOWN_EVENT_TYPES = setOf("USER_TRACK_REF_CREATED", "USER_TRACK_REF_PATCHED", "LIBRARY_ENTRY_UPSERTED", "USER_TRACK_PREFERENCE_SET", "PORTABLE_TRACK_PREFERENCE_PROJECTED", "PLAYLIST_CREATED", "PLAYLIST_METADATA_PATCHED", "PLAYLIST_ENTRY_UPSERTED", "PLAYLIST_ENTRY_MOVED", "AGGREGATE_DELETED", "AGGREGATE_REDIRECT", "LISTENING_EVENT_RECORDED", "RECOMMENDATION_IMPRESSION_RECORDED", "RECOMMENDATION_FEEDBACK_RECORDED") + CATALOG_ARTIST_EVENT_TYPES
     }
 }
 

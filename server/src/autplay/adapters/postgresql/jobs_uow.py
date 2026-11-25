@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import TracebackType
+from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -14,8 +15,9 @@ from .jobs_runtime import PostgresJobRepository
 class SqlAlchemyJobUnitOfWork:
     """Own one SQLAlchemy session and require an explicit application commit."""
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: sessionmaker[Session], *, claim_owner: UUID | None = None) -> None:
         self._session_factory = session_factory
+        self._claim_owner = claim_owner
         self._session: Session | None = None
         self._jobs: PostgresJobRepository | None = None
         self._finished = False
@@ -34,7 +36,7 @@ class SqlAlchemyJobUnitOfWork:
         if self._session is not None:
             raise RuntimeError("unit of work cannot be entered twice")
         self._session = self._session_factory()
-        self._jobs = PostgresJobRepository(self._session)
+        self._jobs = PostgresJobRepository(self._session, claim_owner=self._claim_owner)
         return self
 
     def __exit__(
@@ -80,13 +82,14 @@ class SqlAlchemyJobUnitOfWork:
 class SqlAlchemyJobUnitOfWorkFactory:
     """Create independent job units of work from one configured session factory."""
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: sessionmaker[Session], *, claim_owner: UUID | None = None) -> None:
         self._session_factory = session_factory
+        self._claim_owner = claim_owner
 
     def __call__(self) -> SqlAlchemyJobUnitOfWork:
         """Return a new unopened unit of work."""
 
-        return SqlAlchemyJobUnitOfWork(self._session_factory)
+        return SqlAlchemyJobUnitOfWork(self._session_factory, claim_owner=self._claim_owner)
 
 
 __all__ = ("SqlAlchemyJobUnitOfWork", "SqlAlchemyJobUnitOfWorkFactory")

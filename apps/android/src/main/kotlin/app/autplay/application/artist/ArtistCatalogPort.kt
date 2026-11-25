@@ -1,5 +1,7 @@
 package app.autplay.application.artist
 
+import app.autplay.application.library.names
+import app.autplay.application.library.decoded
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.dao.LibraryArtistTrack
 import app.autplay.data.local.entity.ArtistCreditProjectionEntity
@@ -47,6 +49,8 @@ data class ArtistSummary(
     val countryCode: String?,
     val identityStatus: String?,
     val preferenceByName: Boolean = false,
+    val portraitTrackIds: List<String> = emptyList(),
+    val portraitArtistIds: List<String> = emptyList(),
 )
 
 data class ArtistCreditMember(
@@ -90,6 +94,8 @@ data class ArtistAppearance(
     val releaseStatus: String? = null,
     val releaseMbid: String? = null,
     val performers: List<ArtistSummary> = emptyList(),
+    val releaseGroup: String? = null,
+    val albumArtist: String? = null,
 ) {
     val displayKey: String get() = subjectId?.value ?: "local:${(localTarget as ArtistLocalTarget.Track).localUserTrackRefId}"
 }
@@ -99,6 +105,17 @@ interface ArtistCatalogPort {
     suspend fun browse(profileId: ServerProfileId, limit: Int): List<ArtistSummary>
     fun observeBrowse(profileId: ServerProfileId, limit: Int): Flow<List<ArtistSummary>>
     suspend fun detail(key: ArtistKey, creditLimit: Int, memberLimit: Int): ArtistDetail?
+    suspend fun loadArtistPage(
+        key: ArtistKey,
+        creditLimit: Int,
+        memberLimit: Int,
+        onDetail: (ArtistDetail) -> Unit,
+    ): List<ArtistAppearance>? {
+        val artist = detail(key, creditLimit, memberLimit) ?: return null
+        onDetail(artist)
+        return allAppearances(key)
+    }
+
     suspend fun credit(
         profileId: ServerProfileId,
         creditId: ArtistCreditId,
@@ -134,7 +151,11 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
                 val names = if (row.identityStatus == "PROVISIONAL") displayArtists(row.name) else listOf(artistDisplayName(row.name))
                 names.map { name -> Triple(name, row, names.size == 1) }
             }.groupBy { nameKey(it.first) }
-            val tags = tracks.flatMap { track -> displayArtists(track.artist.orEmpty()).map { it to track } }
+            val tags = tracks.flatMap { row ->
+                val names = trackNames(row.nameInput, row.artist, row.title, row.hasTitle, row.hasArtist, row.cleanSourceTitle, row.cleanSourceArtist)
+                val track = row.copy(title = names.title, artist = names.artist)
+                displayArtists(track.artist.orEmpty()).map { it to track }
+            }
                 .groupBy { nameKey(it.first) }
             val result = mutableListOf<ArtistGroup>()
             for (key in catalogNames.keys + tags.keys) {
@@ -182,12 +203,16 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
                         null, null, null, null, null, credits.isEmpty()), emptyList(), extras.map { it.second }, personal)
                 }
             }
-            result.sortedWith(compareBy({ nameKey(it.artist.name) }, { it.artist.key.artistId.value }))
+            result.map { group ->
+                group.copy(artist = group.artist.copy(portraitTrackIds = group.extraTracks.map { it.trackId },
+                    portraitArtistIds = group.ids))
+            }.sortedWith(compareBy({ nameKey(it.artist.name) }, { it.artist.key.artistId.value }))
         }.flowOn(Dispatchers.Default)
     }
 
-    private suspend fun group(key: ArtistKey): ArtistGroup? {
-        val groups = artistGroups(key.profileId, personal = false).first()
+    private suspend fun group(key: ArtistKey): ArtistGroup? = group(key, artistGroups(key.profileId, personal = false).first())
+
+    private fun group(key: ArtistKey, groups: List<ArtistGroup>): ArtistGroup? {
         return groups.firstOrNull { key == it.artist.key }
             ?: groups.firstOrNull { key.artistId.value in it.ids }
             ?: groups.singleOrNull { likedArtistKey(key.profileId, nameKey(it.artist.name)) == key }
@@ -225,12 +250,35 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
         creditLimit: Int,
         memberLimit: Int,
     ): ArtistDetail? {
+        checkDetailLimits(creditLimit, memberLimit)
+        val group = group(key) ?: return null
+        return readDetail(key, group, creditLimit, memberLimit)
+    }
+
+    override suspend fun loadArtistPage(
+        key: ArtistKey,
+        creditLimit: Int,
+        memberLimit: Int,
+        onDetail: (ArtistDetail) -> Unit,
+    ): List<ArtistAppearance>? {
+        checkDetailLimits(creditLimit, memberLimit)
+        val groups = artistGroups(key.profileId, personal = false).first()
+        val group = withContext(Dispatchers.Default) { group(key, groups) } ?: return null
+        onDetail(ArtistDetail(group.artist, emptyList()))
+        val detail = withContext(Dispatchers.Default) { readDetail(key, group, creditLimit, memberLimit) }
+        if (detail.credits.isNotEmpty()) onDetail(detail)
+        return withContext(Dispatchers.Default) { projectAppearances(key, groups, group, null) }
+    }
+
+    private fun checkDetailLimits(creditLimit: Int, memberLimit: Int) {
         require(
             creditLimit in 1..MAX_PAGE && memberLimit in 1..MAX_MEMBERS &&
                 creditLimit.toLong() * memberLimit <= MAX_DETAIL_MEMBERS
         )
+    }
+
+    private suspend fun readDetail(key: ArtistKey, group: ArtistGroup, creditLimit: Int, memberLimit: Int): ArtistDetail {
         val dao = database.catalogProjectionDao()
-        val group = group(key) ?: return null
         val creditRows = group.ids.chunked(MAX_PAGE).flatMap {
             dao.ownedCreditsForArtist(key.profileId.artistStorageScope, it, creditLimit)
         }.distinctBy { it.serverArtistCreditId }.take(creditLimit)
@@ -278,13 +326,15 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
 
     override suspend fun appearances(key: ArtistKey, limit: Int): List<ArtistAppearance> {
         require(limit in 1..MAX_PAGE)
-        val group = group(key) ?: return emptyList()
-        return withContext(Dispatchers.Default) { projectAppearances(key, group, limit) }
+        val groups = artistGroups(key.profileId, personal = false).first()
+        val group = group(key, groups) ?: return emptyList()
+        return withContext(Dispatchers.Default) { projectAppearances(key, groups, group, limit) }
     }
 
     override suspend fun allAppearances(key: ArtistKey): List<ArtistAppearance> {
-        val group = group(key) ?: return emptyList()
-        return withContext(Dispatchers.Default) { projectAppearances(key, group, null) }
+        val groups = artistGroups(key.profileId, personal = false).first()
+        val group = group(key, groups) ?: return emptyList()
+        return withContext(Dispatchers.Default) { projectAppearances(key, groups, group, null) }
     }
 
     private fun orderedPerformers(credit: String?, artists: List<ArtistSummary>): List<ArtistSummary> {
@@ -293,33 +343,42 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
         return artists.sortedBy { order.indexOf(artistSearchKey(it.name)).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }
     }
 
-    private suspend fun projectAppearances(key: ArtistKey, group: ArtistGroup, limit: Int?): List<ArtistAppearance> {
+    private suspend fun projectAppearances(key: ArtistKey, groups: List<ArtistGroup>, group: ArtistGroup, limit: Int?): List<ArtistAppearance> {
         val dao = database.catalogProjectionDao()
-        val groups = artistGroups(key.profileId, personal = false).first()
         val byId = groups.flatMap { member -> member.ids.map { it to member.artist } }.groupBy({ it.first }, { it.second })
-        val byTrack = groups.flatMap { member -> member.extraTracks.map { it.trackId to member.artist } }.groupBy({ it.first }, { it.second })
+        val extraTrackIds = group.extraTracks.mapTo(hashSetOf()) { it.trackId }
+        val byTrack = if (extraTrackIds.isEmpty()) emptyMap() else groups.asSequence().flatMap { member ->
+            member.extraTracks.asSequence().filter { it.trackId in extraTrackIds }.map { it.trackId to member.artist }
+        }.groupBy({ it.first }, { it.second })
         val pages = mutableListOf<ArtistAppearance>()
         for (ids in group.ids.chunked(MAX_PAGE)) {
             var offset = 0
             val pageSize = limit ?: MAX_PAGE
             do {
                 val rows = dao.ownedSubjectLinksForArtist(key.profileId.artistStorageScope, ids, pageSize, group.personal, offset)
+                if (rows.isEmpty()) break
                 val names = dao.namesForCredits(key.profileId.artistStorageScope, rows.map { it.link.serverArtistCreditId }.distinct(), MAX_MEMBERS)
                     .groupBy { it.serverArtistCreditId }
                 pages += projectPage(key, rows).map { row ->
                     val performers = names[row.creditId?.value].orEmpty().flatMap { name ->
-                        orderedPerformers(name.creditedName, byId[name.serverArtistId].orEmpty())
+                        val linked = byId[name.serverArtistId].orEmpty()
+                        val artist = linked.singleOrNull()
+                        if (artist?.identityStatus == "ACTIVE") listOf(artist.copy(name = musicDisplayTitle(name.creditedName)))
+                        else orderedPerformers(name.creditedName, linked)
                     }.distinctBy { it.key }
                     row.copy(performers = performers, guest = row.guest || performers.size > 1)
                 }
                 offset += rows.size
             } while (limit == null && rows.size == pageSize)
         }
+        val plays = extraTrackIds.chunked(MAX_PAGE).flatMap { dao.trackListenCounts(key.profileId.artistStorageScope, it) }
+            .associate { it.trackId to it.plays }
         val extraTracks = group.extraTracks.map { track ->
             ArtistAppearance(null, SUBJECT_RECORDING, track.recordingId?.let(::ServerId), track.title, ArtistLocalTarget.Track(track.trackId),
+                listenCount = plays[track.trackId] ?: 0,
                 guest = byTrack[track.trackId].orEmpty().size > 1, performers = orderedPerformers(track.artist, byTrack[track.trackId].orEmpty()))
         }
-        val merged = (extraTracks + pages).distinctBy { it.subjectType to it.displayKey }
+        val merged = (extraTracks.sortedByDescending { it.listenCount } + pages).distinctBy { it.subjectType to it.displayKey }
         return if (limit == null) merged else merged.take(limit)
     }
 
@@ -336,6 +395,9 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
                 recordingIds.size,
             ).groupBy { checkNotNull(it.serverRecordingId) }.mapValues { (_, rows) -> rows.first() }
         }
+        val descriptions = trackRefs.values.map { it.localUserTrackRefId }.chunked(MAX_PAGE).flatMap {
+            database.trackMetadataDao().forTracks(key.profileId.artistStorageScope, it)
+        }.associateBy { it.localUserTrackRefId }
         val recordings = if (recordingIds.isEmpty()) emptyMap() else {
             database.catalogProjectionDao().recordingsByServerIds(recordingIds, recordingIds.size)
                 .associateBy { checkNotNull(it.serverRecordingId) }
@@ -359,7 +421,8 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
                 subjectType = link.subjectType,
                 subjectId = ServerId(link.subjectServerId),
                 title = when (link.subjectType) {
-                    SUBJECT_RECORDING -> recording?.title ?: trackRef?.rawTitle
+                    SUBJECT_RECORDING -> descriptions[trackRef?.localUserTrackRefId]?.decoded().names(
+                        trackRef?.rawTitle ?: recording?.title, trackRef?.rawArtist ?: recording?.displayArtist).title
                     SUBJECT_RELEASE -> editions[link.subjectServerId]?.album ?: release?.title
                     else -> null
                 },
@@ -368,6 +431,8 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
                 releaseDate = editions[link.subjectServerId]?.releaseDate ?: release?.releaseDateText,
                 releaseStatus = editions[link.subjectServerId]?.releaseStatus,
                 releaseMbid = editions[link.subjectServerId]?.releaseMbid,
+                releaseGroup = editions[link.subjectServerId]?.releaseGroupId ?: release?.serverReleaseGroupId,
+                albumArtist = editions[link.subjectServerId]?.albumArtist ?: release?.displayArtist,
                 localTarget = when (link.subjectType) {
                     SUBJECT_RECORDING -> trackRef?.let { ArtistLocalTarget.Track(it.localUserTrackRefId) }
                     SUBJECT_RELEASE -> release?.let { ArtistLocalTarget.Release(it.localReleaseId) }
@@ -396,7 +461,7 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
 
     private fun ArtistProjectionEntity.toSummary(profileId: ServerProfileId) = ArtistSummary(
         ArtistKey(profileId, ArtistId(serverArtistId)),
-        artistDisplayName(name),
+        if (identityStatus == "PROVISIONAL") musicDisplayCredit(name) else artistDisplayName(name),
         sortName,
         artistType,
         disambiguation,
@@ -415,8 +480,8 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
 }
 
 internal fun artistNameMatches(name: String, query: String): Boolean {
-    val needle = artistSearchKey(query)
-    val label = artistSearchKey(name)
+    val needle = artistSearchKey(StageCredits.display(query.trim()))
+    val label = artistSearchKey(StageCredits.display(name.trim()))
     if (needle.isEmpty()) return false
     if (needle in label) return true
     if (needle.length < 4) return false

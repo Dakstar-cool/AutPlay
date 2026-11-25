@@ -68,13 +68,14 @@ internal class MetadataAlbumProjector {
         val metadata = runCatching { TrackMetadata.decode(Json.parseToJsonElement(row.payloadJson).jsonObject) }.getOrNull()
             ?: return
         val group = metadata.albumGroup() ?: return
+        val names = metadata.names(row.rawTitle, row.rawArtist)
         val previous = tracks[row.localUserTrackRefId]
         if (previous == null || row.metadataUpdatedAtMs >= previous.updatedAtMs) {
             tracks[row.localUserTrackRefId] = Entry(row.localUserTrackRefId, row.metadataUpdatedAtMs, row.addedAtMs,
                 // Keep compact evidence only; the complete raw document stays in Room.
                 group.copy(payload = kotlinx.serialization.json.JsonObject(emptyMap())),
                 MetadataAlbumMember(row.localUserTrackRefId, row.localRecordingId,
-                    metadata.text("title", row.rawTitle), metadata.text("artist", row.rawArtist),
+                    names.title, names.artist,
                     row.rawDurationMs, group.discNumber, group.trackNumber, metadata.artworkSha256 != null))
         }
     }

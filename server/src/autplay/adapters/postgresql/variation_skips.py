@@ -1,6 +1,5 @@
 """Owner-only recommendation outcomes, aggregated across devices within a rolling window."""
 
-import re
 from datetime import datetime, timedelta
 from typing import TypedDict
 from uuid import UUID
@@ -10,30 +9,7 @@ from sqlalchemy.orm import Session
 
 from autplay.domain.adaptive_recommendations import DEFAULT_ADAPTIVE_FEATURE_POLICY
 
-KINDS = {"COVER", "REMIX", "LIVE"}
-_LABEL = re.compile(r"(?:\s*[\[(]([^\[\]()]+)[])]|\s+[-\u2013\u2014]\s+([^\u2013\u2014-]+))\s*$")
-_LABELS = (
-    ("COVER", re.compile(r"(?:.+\s+)?(?:cover|кавер)|(?:cover|кавер|originally by)\s+.+", re.I)),
-    ("REMIX", re.compile(r"(?:.+\s+)?(?:remix|ремикс)", re.I)),
-    ("LIVE", re.compile(r"live(?: version|\s+(?:at|in|from)\s+.+)?|концертная(?: версия)?", re.I)),
-)
-
-
-def variation_kind(
-    role: str | None, live: bool, kind: str | None, version: str | None, title: str | None
-) -> str | None:
-    if role in {"REMIX", "COVER"}:
-        return role
-    if role == "VERSION" and live:
-        return "LIVE"
-    if kind in KINDS:
-        return kind
-    labels = [version or ""]
-    base = (title or "").strip()
-    while match := _LABEL.search(base):
-        labels.append((match[1] or match[2]).strip())
-        base = base[: match.start()].rstrip()
-    return next((k for k, pattern in _LABELS if any(pattern.fullmatch(s) for s in labels)), None)
+from autplay.domain.music_variations import KINDS, variation_kind
 
 
 class VariationCount(TypedDict):

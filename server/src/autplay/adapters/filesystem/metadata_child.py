@@ -128,8 +128,8 @@ def execute(command: dict[str, object], source: BinaryIO, destination: BinaryIO)
                     storage.check_namespace()
                     if storage.verify_object(key) != expected:
                         raise MetadataProviderError("metadata_audio_integrity", retryable=False)
-                elif action == "ARTWORK" and set(request) == {"action"} and payload is not None:
-                    result = reader.normalize_artwork(payload)
+                elif action in {"ARTWORK", "CATALOG_COVER"} and set(request) == {"action"} and payload is not None:
+                    result = reader.normalize_artwork(payload, catalog_cover=True) if action == "CATALOG_COVER" else reader.normalize_artwork(payload)
                 elif action == "HTTP" and set(request) == {"action", "url", "artwork", "post"}:
                     if (
                         type(request["artwork"]) is not bool

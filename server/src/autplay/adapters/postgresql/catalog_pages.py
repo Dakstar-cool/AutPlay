@@ -55,6 +55,26 @@ class CatalogPageCache:
                 .all()
             )
 
+    def library_artist_id(self, owner: UUID, mbid: UUID) -> str | None:
+        with self.sessions() as session:
+            artist = session.scalar(
+                text("""
+                    SELECT x.artist_id FROM identity.external_reference x
+                    JOIN identity.source_provider p USING (provider_id)
+                    WHERE p.provider_key = 'musicbrainz' AND p.deleted_at IS NULL
+                        AND x.deleted_at IS NULL AND x.market_scope = 'GLOBAL'
+                        AND x.external_entity_type = 'ARTIST' AND x.external_id = :mbid
+                        AND EXISTS (
+                            SELECT 1 FROM catalog.artist_credit_name n
+                            JOIN catalog.recording r ON r.artist_credit_id = n.artist_credit_id
+                            JOIN library.user_track_ref u ON u.recording_id = r.recording_id
+                            WHERE n.artist_id = x.artist_id AND r.deleted_at IS NULL
+                                AND u.deleted_at IS NULL AND u.user_id = :owner)
+                """),
+                {"mbid": str(mbid), "owner": owner},
+            )
+            return str(artist) if artist is not None else None
+
     def artist_recordings(self, owner: UUID, artist: UUID) -> tuple[str | None, dict[str, str]]:
         with self.sessions() as session:
             rows = session.execute(
@@ -86,10 +106,26 @@ class CatalogPageCache:
             return artists.pop(), {row[1]: str(row[2]) for row in rows if row[1]}
 
     def read(self, key: str, refresh: Callable[[], dict[str, object]]) -> dict[str, object]:
+        return self.update(key, lambda _: refresh())
+
+    def saved(self, key: str) -> tuple[dict[str, object], datetime] | None:
+        with self.sessions() as session:
+            page = session.get(CatalogBrowsePageRow, key)
+            return (page.document, page.observed_at) if page is not None else None
+
+    def update(
+        self,
+        key: str,
+        refresh: Callable[[dict[str, object] | None], dict[str, object]],
+        *,
+        pending: Callable[[dict[str, object]], bool] | None = None,
+    ) -> dict[str, object]:
         with self.sessions.begin() as session:
             cutoff = datetime.now(UTC) - timedelta(hours=12)
             page = session.get(CatalogBrowsePageRow, key)
-            if page is not None and page.observed_at >= cutoff:
+            if page is not None and page.observed_at >= cutoff and not (
+                pending and pending(page.document)
+            ):
                 return page.document
             # Serve stale data during refresh. Cold readers share the completed provider response.
             locked = session.scalar(
@@ -110,10 +146,12 @@ class CatalogPageCache:
                         ) from exc
                     raise
             page = session.get(CatalogBrowsePageRow, key, populate_existing=True)
-            if page is not None and page.observed_at >= cutoff:
+            if page is not None and page.observed_at >= cutoff and not (
+                pending and pending(page.document)
+            ):
                 return page.document
             try:
-                document = refresh()
+                document = refresh(page.document if page is not None else None)
             except MetadataProviderError as exc:
                 if page is not None and exc.retryable:
                     return page.document

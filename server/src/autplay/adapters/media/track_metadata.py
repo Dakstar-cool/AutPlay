@@ -13,6 +13,7 @@ from autplay.ports.vault import ExecutableRunner
 _TAG_FIELDS = {
     "title": "title",
     "artist": "artist",
+    "composer": "composer",
     "album": "album",
     "album_artist": "album_artist",
     "albumartist": "album_artist",
@@ -165,7 +166,7 @@ class FfmpegMetadataReader:
         except MediaValidationError, ValueError, OverflowError, TypeError, KeyError:
             return None
 
-    def normalize_artwork(self, payload: bytes) -> bytes:
+    def normalize_artwork(self, payload: bytes, *, catalog_cover: bool = False) -> bytes:
         if not 1 <= len(payload) <= 4194304:
             raise MetadataProviderError("metadata_artwork_size", retryable=False)
         if not isinstance(self.runner, SubprocessExecutableRunner):
@@ -195,6 +196,10 @@ class FfmpegMetadataReader:
                 or not all(0 < streams[0][axis] <= 4096 for axis in ("width", "height"))
             ):
                 raise ValueError("dimensions")
+            if catalog_cover:
+                width, height = streams[0]["width"], streams[0]["height"]
+                if min(width, height) < 200 or max(width, height) > 1.25 * min(width, height):
+                    raise ValueError("cover dimensions")
         except (ValueError, TypeError, KeyError) as error:
             raise MetadataProviderError("metadata_artwork_invalid", retryable=False) from error
         result = self.runner.run_input(

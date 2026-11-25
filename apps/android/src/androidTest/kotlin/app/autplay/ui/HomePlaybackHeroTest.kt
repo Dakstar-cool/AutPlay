@@ -212,7 +212,7 @@ class HomePlaybackHeroTest {
     }
 
     @Test
-    fun russianHeroStacksHeaderAndActionAtTwoHundredPercentFontScale() {
+    fun russianHeroActionsStayAccessibleAtTwoHundredPercentFontScale() {
         var toggles = 0
         val configuration = Configuration(context.resources.configuration).apply {
             setLocale(java.util.Locale.forLanguageTag("ru"))
@@ -249,9 +249,7 @@ class HomePlaybackHeroTest {
             }
         }
 
-        val heading = composeRule.onNodeWithTag("home-hero-heading").fetchSemanticsNode().boundsInRoot
-        val action = composeRule.onNodeWithTag("home-listen-together").fetchSemanticsNode().boundsInRoot
-        assertTrue("Hero action must be stacked below the heading at 200% font scale", heading.bottom <= action.top)
+        composeRule.onNodeWithTag("home-hero-heading").assertDoesNotExist()
         composeRule.onNodeWithTag("home-listen-together")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
         composeRule.onNodeWithContentDescription(localizedContext.getString(R.string.action_play))

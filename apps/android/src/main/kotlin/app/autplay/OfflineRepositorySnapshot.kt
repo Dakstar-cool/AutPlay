@@ -66,7 +66,8 @@ internal fun rememberOfflineRepositorySnapshot(
         .collectAsState(initial = emptyList())
     val historyCount by remember(coreRepository, profileId) { coreRepository.historyCount(profileId) }
         .collectAsState(initial = 0)
-    val downloads by downloadRepository.observePresentation(profileId).collectAsState(initial = emptyList())
+    val downloads by remember(downloadRepository, profileId) { downloadRepository.observePresentation(profileId) }
+        .collectAsState(initial = emptyList())
     val localAudio by remember(coreRepository, profileId) { coreRepository.localAudio(profileId) }
         .collectAsState(initial = emptyList())
     val downloadedTrackIds by remember(coreRepository, profileId) {

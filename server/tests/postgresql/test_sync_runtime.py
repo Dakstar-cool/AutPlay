@@ -891,6 +891,20 @@ def test_p07_local_payloads_preference_and_playlist_parent_authorization(databas
                 "pending_local_event_count": 0,
             },
         )
+        assert all(row["aggregate_type"] != "USER_TRACK_PREFERENCE" for row in snapshot["aggregates"])
+        personal = service.bootstrap(owner, {
+            **owner_body,
+            "reason": "FIRST_SYNC",
+            "pending_local_event_count": 0,
+            "capabilities": ["PERSONAL_LIBRARY_V2"],
+        })
+        assert personal["personal_library_version"] == 2
+        ref, entry, preference = personal["aggregates"][:3]
+        assert (ref["aggregate_type"], entry["aggregate_type"], preference["aggregate_type"]) == (
+            "USER_TRACK_REF", "LIBRARY_ENTRY", "USER_TRACK_PREFERENCE",
+        )
+        assert preference["payload"]["server_user_track_ref_id"] == str(ref_id)
+        assert preference["payload"]["preference"] == "LIKED"
         projected = {row["aggregate_type"]: row["payload"] for row in snapshot["aggregates"]}
         assert projected["LIBRARY_ENTRY"]["server_user_track_ref_id"] == str(ref_id)
         assert projected["PLAYLIST_ENTRY"] == {

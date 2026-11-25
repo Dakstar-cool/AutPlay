@@ -56,4 +56,8 @@
     <string name="catalog_match_missing">Недостаточно данных для сопоставления</string>
     <string name="catalog_track_failed">Ошибка загрузки</string>
     <string name="catalogue_on_phone">На телефоне</string>
+    <string name="download_wait_network">Ожидание подключения к сети</string>
+    <string name="download_wait_unmetered">Ожидание Wi-Fi или другой сети без тарификации</string>
+    <string name="download_allow_metered">Разрешить загрузки через мобильную сеть</string>
+    <string name="player_find_phone_audio">Найти этот трек на телефоне</string>
 </resources>

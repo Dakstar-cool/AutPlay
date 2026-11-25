@@ -61,6 +61,10 @@ internal data class CoreProductRouteActions(
     val searchPersonal: ((LibrarySection, LibraryFilter, String) -> kotlinx.coroutines.flow.Flow<LibraryScreenUiState>)? = null,
     val openHeroArtist: (() -> Unit)? = null,
     val playReleaseEntry: ((String) -> Unit)? = null,
+    val beginHomeSeek: (Long) -> Unit = {},
+    val updateHomeSeek: (Long) -> Unit = {},
+    val commitHomeSeek: () -> Unit = {},
+    val observeHomeTimeline: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -100,6 +104,10 @@ internal fun CoreProductRouteRenderer(
             onContinueListening = actions.continueHomeQueue,
             onStartMyWave = actions.startMyWave,
             onPlayWheelMix = actions.playWheelMix,
+            onSeekBegin = actions.beginHomeSeek,
+            onSeekUpdate = actions.updateHomeSeek,
+            onSeekCommit = actions.commitHomeSeek,
+            onTimelineObserving = actions.observeHomeTimeline,
             myWaveAllowed = actions.myWaveAllowed,
             onAddLocal = actions.addLocal,
             importingLocalTrack = libraryState.importingLocalTrack,

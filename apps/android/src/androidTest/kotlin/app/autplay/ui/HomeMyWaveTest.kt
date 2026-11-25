@@ -3,6 +3,8 @@ package app.autplay.ui
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertIsSelected
@@ -45,7 +47,31 @@ class HomeMyWaveTest {
         }
         compose.onNodeWithTag("home-add-first-track").assertIsDisplayed().performClick()
         compose.onNodeWithTag("home-my-wave").assertIsNotEnabled()
+        compose.onNodeWithTag("home-wheel-timeline").assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, imports); assertEquals(0, starts) }
+    }
+
+    @Test fun recommendationWheelSeeksThePausedTrackWithoutOpeningThePlayer() {
+        val state = mutableStateOf(PlaybackPresentationState(mediaId = "paused-entry", positionMs = 12_000,
+            durationMs = 80_000, isSeekable = true, seekEnabled = true, controls = PlaybackControlGate.Allowed))
+        var targetMs = 0L
+        var commits = 0
+        compose.setContent {
+            AutPlayTheme {
+                HomeProductScreen(HomeScreenUiState(false, false, false, emptyList(), emptyList()),
+                    PaddingValues(), {}, {}, {}, {}, playerState = state.value,
+                    onSeekBegin = { targetMs = it }, onSeekUpdate = { targetMs = it }, onSeekCommit = { commits++ })
+            }
+        }
+        compose.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-wheel-timeline"))
+        val slider = compose.onNodeWithContentDescription(context.getString(R.string.player_seek_description))
+        slider.assertIsEnabled().performSemanticsAction(SemanticsActions.SetProgress) { it(43_000f) }
+        compose.runOnIdle {
+            assertEquals(43_000L, targetMs)
+            assertEquals(1, commits)
+            state.value = state.value.copy(seekEnabled = false)
+        }
+        slider.assertIsNotEnabled()
     }
 
     @Test fun randomActionCanBeRepeatedAndDoesNotOpenListenTogether() {
@@ -128,7 +154,7 @@ class HomeMyWaveTest {
         val focus = context.getString(R.string.home_context_focus)
         compose.onNodeWithText(focus).performClick()
         compose.onNodeWithText(focus).assertIsSelected()
-        compose.onNodeWithText(context.getString(R.string.home_wheel_preview)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.home_wheel_preview)).assertDoesNotExist()
         compose.onNodeWithTag("home-wave-wheel").performTouchInput { swipeLeft() }
         compose.runOnIdle { assertEquals(1, played.size) }
     }

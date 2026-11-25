@@ -70,27 +70,73 @@ class PlaybackServiceLifecycleTest {
         } finally { fixture.close() }
     }
 
+    @Test fun personalWaveKeepsNotificationNextAndNeverReplaysAfterExhaustion() = runBlocking {
+        val fixture = Fixture(2)
+        val wave = app.autplay.application.recommendation.PersonalWaveSession.start("GENERAL")
+        try {
+            fixture.start(listOf("readable", "readable"), sourceContextId = wave.queueContext(null),
+                queueIndices = listOf(0)) {
+                fixture.database.libraryDao().upsertEntry(app.autplay.data.local.entity.LibraryEntryEntity(
+                    LocalId.random().value, null, fixture.tracks[1], 1, "LOCAL", "LOCAL", "CLEAN", null, 0, null, 1,
+                ))
+                fixture.database.useWriterConnection { connection ->
+                    connection.usePrepared("UPDATE local_audio_state SET persisted_uri_permission=1 WHERE local_audio_state_id=?") {
+                        it.bindText(1, fixture.audioIds[1]); it.step()
+                    }
+                }
+            }
+            val platform = fixture.platformController()
+            val nextLabel = InstrumentationRegistry.getInstrumentation().targetContext.getString(app.autplay.R.string.player_next_track)
+            fixture.await("wave appends playable successor") {
+                fixture.main { fixture.controller?.isPlaying == true && fixture.controller?.hasNextMediaItem() == true }
+            }
+            fixture.await("notification offers next at the initial wave tail") {
+                platform.playbackState?.let { state ->
+                    state.actions and android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT != 0L ||
+                        state.customActions.any { it.name.toString() == nextLabel }
+                } == true
+            }
+            val snapshot = requireNotNull(fixture.database.queueDao().activeSnapshotOnce()).queueSnapshotId
+            fixture.main { fixture.controller?.let { it.seekTo(it.duration - 250L) } }
+            fixture.await("automatic transition to appended track") {
+                fixture.main { fixture.controller?.currentMediaItemIndex == 1 && fixture.controller?.isPlaying == true }
+            }
+            fixture.main { fixture.controller?.let { it.seekTo(it.duration - 250L) } }
+            fixture.await("wave exhausted") { fixture.main { fixture.controller?.playbackState == Player.STATE_ENDED } }
+            platform.transportControls.play()
+            delay(600)
+            fixture.main {
+                assertEquals(Player.STATE_ENDED, fixture.controller?.playbackState)
+                assertEquals(1, fixture.controller?.currentMediaItemIndex)
+            }
+            assertEquals(snapshot, fixture.database.queueDao().activeSnapshotOnce()?.queueSnapshotId)
+        } finally { fixture.close() }
+    }
+
     @Test fun notificationExportsNativeFeedbackActionsAndRatesTheCapturedTrack() = runBlocking {
         val fixture = Fixture()
         try {
             fixture.start(listOf("readable", "readable"))
             fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
             val platform = fixture.platformController()
-            fixture.await { platform.playbackState?.customActions?.map { it.action } ==
-                listOf(PlaybackNotification.ACTION_DISLIKE, PlaybackNotification.ACTION_LIKE) }
-            val actions = checkNotNull(platform.playbackState).customActions
+            val feedback = setOf(PlaybackNotification.ACTION_LIKE, PlaybackNotification.ACTION_DISLIKE)
+            fun feedbackActions() = platform.playbackState?.customActions.orEmpty().filter { it.action in feedback }
+            fixture.await { feedbackActions().size == 2 }
+            val actions = feedbackActions()
+            assertEquals(listOf(PlaybackNotification.ACTION_LIKE, PlaybackNotification.ACTION_DISLIKE), actions.map { it.action })
             actions.forEach {
                 assertTrue(it.icon != 0)
                 assertEquals(fixture.entries[0].value, it.extras?.getString(PlaybackNotification.EXTRA_QUEUE_ENTRY_ID))
             }
             val like = actions.single { it.action == PlaybackNotification.ACTION_LIKE }
             val dislike = actions.single { it.action == PlaybackNotification.ACTION_DISLIKE }
-            val unfilledIcon = like.icon
+            assertEquals(app.autplay.R.drawable.ic_autplay_favorite, like.icon)
+            assertEquals(app.autplay.R.drawable.ic_autplay_heart_off, dislike.icon)
             platform.transportControls.sendCustomAction(like.action, like.extras)
             fixture.await { fixture.database.libraryDao().preference(fixture.tracks[0])?.preference == "LIKED" }
             fixture.await { platform.playbackState?.customActions?.singleOrNull {
                 it.action == PlaybackNotification.ACTION_LIKE
-            }?.let { it.icon != unfilledIcon } == true }
+            }?.icon == app.autplay.R.drawable.ic_autplay_favorite_filled }
             platform.transportControls.sendCustomAction(dislike.action, dislike.extras)
             fixture.await { fixture.main { fixture.controller?.currentMediaItem?.mediaId == fixture.entries[1].value } }
             fixture.await { fixture.database.libraryDao().preference(fixture.tracks[0])?.preference == "DISLIKED" }
@@ -309,6 +355,44 @@ class PlaybackServiceLifecycleTest {
                 fixture.await { fixture.main { fixture.controller?.duration == if (source == "short") 2_000L else 40_000L } }
             } finally { fixture.close() }
         }
+    }
+
+    @Test fun repeatButtonConsumesOneReplayOrKeepsLoopingUntilCleared() = runBlocking {
+        val fixture = Fixture()
+        try {
+            fixture.start(listOf("readable", "readable"))
+            fixture.await { fixture.main { fixture.controller?.isPlaying == true } }
+
+            suspend fun cycle(index: Int, expected: String) {
+                fixture.owner.dispatch(PlaybackCommand.CycleTrackRepeat(fixture.entries[index]))
+                fixture.await { PlaybackRuntimeState.state.value.repeatMode == expected }
+            }
+
+            suspend fun reachEnd(index: Int, nextIndex: Int) {
+                assertEquals(fixture.entries[index].value, fixture.main { fixture.controller?.currentMediaItem?.mediaId })
+                fixture.main { fixture.controller?.pause() }
+                fixture.owner.dispatch(PlaybackCommand.SeekTo(39_800))
+                fixture.await { fixture.main { fixture.controller?.currentPosition == 39_800L } }
+                fixture.main { fixture.controller?.play() }
+                fixture.await { fixture.main {
+                    val player = fixture.controller ?: return@main false
+                    player.currentMediaItem?.mediaId == fixture.entries[nextIndex].value &&
+                        player.currentPosition < 3_000 && player.isPlaying
+                } }
+            }
+
+            cycle(0, "ONCE")
+            reachEnd(0, 0)
+            fixture.await { PlaybackRuntimeState.state.value.repeatMode == "OFF" }
+            reachEnd(0, 1)
+            cycle(1, "ONCE")
+            cycle(1, "ONE")
+            repeat(2) {
+                reachEnd(1, 1)
+                assertEquals("ONE", PlaybackRuntimeState.state.value.repeatMode)
+            }
+            cycle(1, "OFF")
+        } finally { fixture.close() }
     }
 
     @Test fun repeatOneReplaysFromZeroAndCreatesANewListen() = runBlocking {
@@ -605,7 +689,7 @@ class PlaybackServiceLifecycleTest {
         }
 
         suspend fun start(sources: List<String>, smooth: Boolean = false, queueType: String = "USER", startPositionMs: Long = 0,
-            sourceContextId: String? = null, beforePlayback: suspend () -> Unit = {}) {
+            sourceContextId: String? = null, queueIndices: List<Int> = sources.indices.toList(), beforePlayback: suspend () -> Unit = {}) {
             if (original == null) { original = settings.settings.first(); settings.update(NonSecretSettings()) }
             smoothTransitions(smooth)
             main { context.stopService(Intent(context, AutPlayPlaybackService::class.java)) }
@@ -633,7 +717,7 @@ class PlaybackServiceLifecycleTest {
                         "AVAILABLE", "USER_IMPORT", 640_044, null, null, 1, 1))
                 }
             }
-            val snapshot = activate(sources.indices.toList(), queueType, sourceContextId)
+            val snapshot = activate(queueIndices, queueType, sourceContextId)
             if (startPositionMs > 0) PlaybackPersistenceRepository(database).selectIdleEntry(
                 snapshot, entries[0], startPositionMs, "OFF", "OFF", null, System.currentTimeMillis(),
             )
@@ -743,7 +827,7 @@ class PlaybackServiceLifecycleTest {
                 for (snapshot in snapshots) connection.usePrepared("DELETE FROM queue_snapshot WHERE queue_snapshot_id = ?") { it.bindText(1, snapshot); it.step() }
                 for (track in tracks) {
                     connection.usePrepared("DELETE FROM local_mutation_outbox WHERE aggregate_local_id = ?") { it.bindText(1, track); it.step() }
-                    for (table in listOf("user_track_preference", "listening_event", "local_audio_state", "user_track_ref")) {
+                    for (table in listOf("user_track_preference", "listening_event", "library_entry", "local_audio_state", "user_track_ref")) {
                         connection.usePrepared("DELETE FROM $table WHERE local_user_track_ref_id = ?") { it.bindText(1, track); it.step() }
                     }
                 }

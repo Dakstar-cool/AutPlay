@@ -35,6 +35,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -197,6 +198,23 @@ class Media3DownloadRuntimeTest {
             streamDirectory.deleteRecursively()
             directory.deleteRecursively()
         }
+    }
+
+    @Test fun cancellingHidesTheRowEvenAfterALateMedia3Callback() = runBlocking {
+        val db = AutPlayRuntime.database(context)
+        val repository = app.autplay.application.download.DownloadIntentRepository(context, db)
+        val trackId = UUID.randomUUID().toString()
+        val intentId = UUID.randomUUID().toString()
+        val profile = UUID.randomUUID().toString()
+        db.libraryDao().upsertTrackRef(track(trackId))
+        db.localAudioDao().upsertDownloadIntent(DownloadIntentEntity(intentId, trackId, null, intentId,
+            "USER_DOWNLOAD", "DIRECT_ORIGINAL", "VAULT_ONLY", "REQUESTED", null, 1, 1, null, profile, null))
+        assertEquals(intentId, repository.observePresentation(profile).first().single().stableId)
+        repository.cancel(intentId, profile, 2)
+        val request = DownloadRequest.Builder(intentId, Uri.parse("test://audio/cancel")).build()
+        repository.reconcile(Download(request, Download.STATE_FAILED, 1, 3, -1L, 0, Download.FAILURE_REASON_UNKNOWN), IOException(), 3)
+        assertEquals("CANCELLED", db.localAudioDao().downloadIntent(intentId)?.state)
+        assertTrue(repository.observePresentation(profile).first().isEmpty())
     }
 
     private fun await(label: String, timeoutMs: Long = 10_000, condition: () -> Boolean) {

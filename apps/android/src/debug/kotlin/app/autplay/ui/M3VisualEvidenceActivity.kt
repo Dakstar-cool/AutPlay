@@ -105,7 +105,7 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                 mutableStateOf(if (screen == "player-dragging") 140_000L else null)
             }
             var fixtureShuffle by remember { mutableStateOf(false) }
-            var fixtureRepeat by remember { mutableStateOf(RepeatModePresentation.Off) }
+            var repeatPresses by remember { mutableStateOf(0) }
             AutPlayTheme(
                 AutPlayAppearance(if (dark) AutPlayThemeMode.Dark else AutPlayThemeMode.Light),
             ) {
@@ -126,16 +126,13 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                 positionMs = fixturePositionMs,
                                 seekPreviewPositionMs = fixtureSeekPreviewMs,
                                 shuffleModeEnabled = fixtureShuffle,
-                                repeatMode = fixtureRepeat,
+                                repeatMode = if (repeatPresses == 0) RepeatModePresentation.Off else RepeatModePresentation.One,
+                                repeatOnce = repeatPresses == 1,
                             ),
                             onTogglePlayPause = { fixturePlaying = !fixturePlaying },
                             onToggleShuffle = { fixtureShuffle = !fixtureShuffle },
                             onCycleRepeat = {
-                                fixtureRepeat = when (fixtureRepeat) {
-                                    RepeatModePresentation.Off -> RepeatModePresentation.All
-                                    RepeatModePresentation.All -> RepeatModePresentation.One
-                                    RepeatModePresentation.One -> RepeatModePresentation.Off
-                                }
+                                repeatPresses = (repeatPresses + 1) % 3
                             },
                             onSeekBegin = { fixtureSeekPreviewMs = it },
                             onSeekUpdate = { fixtureSeekPreviewMs = it },

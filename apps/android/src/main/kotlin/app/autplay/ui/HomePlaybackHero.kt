@@ -30,7 +30,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -128,13 +127,7 @@ public fun HomePlaybackHero(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        HomeHeroHeader(stringResource(when {
-            state.hasActivePlayback && !state.playPauseEnabled -> R.string.home_hero_control_locked
-            state.isPlaying -> R.string.home_hero_playing
-            state.hasActivePlayback -> R.string.home_hero_ready
-            localMode -> R.string.home_wave_on_device
-            else -> R.string.home_hero_personal_flow
-        }), togetherLabel, onOpenListenTogether)
+        HomeHeroHeader(togetherLabel, onOpenListenTogether)
         Spacer(Modifier.height(6.dp))
         WaveHeadline(artist, if (onOpenArtist == null) Modifier else Modifier
             .testTag("hero-open-artist").clickable(onClickLabel = stringResource(R.string.detail_open_artist),
@@ -196,8 +189,7 @@ internal fun HomeWaveStartHero(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        HomeHeroHeader(stringResource(if (localMode) R.string.home_wave_on_device else R.string.home_hero_personal_flow),
-            stringResource(R.string.nav_wave_rooms), onOpenListenTogether)
+        HomeHeroHeader(stringResource(R.string.nav_wave_rooms), onOpenListenTogether)
         Spacer(Modifier.height(32.dp))
         WaveHeadline(stringResource(R.string.home_my_wave))
         Surface(
@@ -231,7 +223,7 @@ internal fun HomeWaveStartHero(
                 }
             }
         }
-        if (!enabled) Text(stringResource(if (emptyLibrary) R.string.home_first_track_body else R.string.home_my_wave_locked),
+        if (!enabled && !emptyLibrary) Text(stringResource(R.string.home_my_wave_locked),
             textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
     }
 }
@@ -265,46 +257,24 @@ private fun Modifier.waveGlow(accent: Color, secondary: Color, base: Color): Mod
 }
 
 @Composable
-private fun HomeHeroHeader(label: String, togetherLabel: String, onOpen: () -> Unit) {
+private fun HomeHeroHeader(togetherLabel: String, onOpen: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val fontScale = LocalDensity.current.fontScale
-    Box(Modifier.fillMaxWidth()) {
-        val heading: @Composable (Modifier) -> Unit = { modifier ->
-            Text(
-                label,
-                modifier = modifier.testTag("home-hero-heading"),
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.onSurfaceVariant,
-            )
-        }
-        val action: @Composable () -> Unit = {
-            Surface(
-                onClick = onOpen,
-                modifier = Modifier.testTag("home-listen-together").heightIn(min = 48.dp)
-                    .semantics { contentDescription = togetherLabel; role = Role.Button },
-                shape = CircleShape,
-                color = colors.surfaceContainerHigh,
-                contentColor = colors.onSurface,
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+        Surface(
+            onClick = onOpen,
+            modifier = Modifier.testTag("home-listen-together").heightIn(min = 48.dp)
+                .semantics { contentDescription = togetherLabel; role = Role.Button },
+            shape = CircleShape,
+            color = colors.surfaceContainerHigh,
+            contentColor = colors.onSurface,
+        ) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    AutPlayPlatformIcon(AutPlayIcon.Wave, null, Modifier.size(18.dp), colors.primary)
-                    Text(stringResource(R.string.home_listen_together_short), style = MaterialTheme.typography.labelLarge)
-                }
-            }
-        }
-        if (fontScale >= 1.5f) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                heading(Modifier)
-                action()
-            }
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                heading(Modifier.weight(1f))
-                action()
+                AutPlayPlatformIcon(AutPlayIcon.Wave, null, Modifier.size(18.dp), colors.primary)
+                Text(stringResource(R.string.home_listen_together_short), style = MaterialTheme.typography.labelLarge)
             }
         }
     }

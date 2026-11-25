@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from autplay.adapters.public_track_metadata import PublicMetadataHttp, is_cover_url
+from autplay.domain.catalog_artwork import catalogue_api_url
 from autplay.ports.track_metadata import MetadataProviderError
 
 from .metadata_protocol import write_packet
@@ -44,10 +45,10 @@ def execute(command: dict[str, object], destination: BinaryIO) -> None:
         and re.fullmatch(r"/1/popularity/top-recordings-for-artist/[0-9a-f-]{36}", parsed.path)
     )
     metadata = parsed.hostname == "musicbrainz.org" and re.fullmatch(
-        r"/ws/2/(?:artist|recording|release|(?:recording|release)/[0-9a-fA-F-]{36})", parsed.path
+        r"/ws/2/(?:artist|recording|release|(?:artist|recording|release)/[0-9a-fA-F-]{36})", parsed.path
     )
     cover = is_cover_url(url)
-    if not (metadata or artist_ranking or cover):
+    if not (metadata or artist_ranking or cover or catalogue_api_url(url)):
         raise MetadataProviderError("metadata_url_rejected", retryable=False)
     sent = False
 

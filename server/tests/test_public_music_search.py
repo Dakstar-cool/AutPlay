@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
@@ -287,3 +288,19 @@ def test_release_track_keeps_recording_versions_without_inventing_performer() ->
     recording["artist-credit"] = [{"name": "Actual Artist"}]
     card = MusicBrainzDiscoveryProvider(http).release_tracks(release_id, limit=1, offset=0).items[0]
     assert card.download_search_query == "Actual Artist Song (Live)"
+
+
+def test_recent_artist_release_search_uses_exact_artist_dates_and_raw_offsets() -> None:
+    artist = uuid4()
+    http = Http({"count": 52, "offset": 50, "releases": [
+        {"id": str(uuid4()), "title": "Single", "status": "Official", "date": "2026-11-23"},
+        {"id": str(uuid4()), "title": "Demo", "status": "Bootleg"},
+    ]})
+    page = MusicBrainzDiscoveryProvider(http).recent_artist_releases(
+        artist, date(2026, 11, 18), date(2026, 11, 25), limit=50, offset=50
+    )
+    params = parse_qs(urlsplit(http.urls[0]).query)
+    expression = f"arid:{artist} AND status:official AND date:[2026-11-18 TO 2026-11-25]"
+    assert params["query"] == [expression]
+    assert params["offset"] == ["50"] and page.view()["next_offset"] is None
+    assert [item.title for item in page.items] == ["Single"]

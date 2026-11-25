@@ -14,7 +14,7 @@ class SafeFtsQueryBuilder(
 
     /** Returns null for an empty/non-searchable query so callers never trigger an unbounded scan. */
     fun build(rawInput: String): String? {
-        val tokens = tokenize(rawInput.take(maxInputCharacters))
+        val tokens = tokenize(app.autplay.application.artist.artistSearchKey(rawInput.take(maxInputCharacters)))
         if (tokens.isEmpty()) {
             return null
         }
@@ -25,8 +25,15 @@ class SafeFtsQueryBuilder(
     }
 
     /** Fixed columns restrict every token; callers still bind the complete MATCH expression. */
-    fun build(rawInput: String, kind: LibrarySearchKind): String? =
-        build(rawInput)?.let { expression -> "${kind.ftsColumns}:($expression)" }
+    fun build(rawInput: String, kind: LibrarySearchKind): String? {
+        val expression = build(rawInput) ?: return null
+        val original = "${kind.ftsColumns}:($expression)"
+        if (kind != LibrarySearchKind.Artist && kind != LibrarySearchKind.All) return original
+        val stage = app.autplay.application.artist.StageCredits.single(rawInput.take(maxInputCharacters).trim())?.stage
+        val alternative = stage?.let { build(it) }
+        return if (alternative == null || alternative == expression) original
+            else "($original OR artist:($alternative))"
+    }
 
     private fun tokenize(input: String): List<String> {
         val tokens = mutableListOf<String>()

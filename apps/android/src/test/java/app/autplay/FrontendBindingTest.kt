@@ -58,11 +58,12 @@ class FrontendBindingTest {
     }
 
     @Test
-    fun `wave prefetch setting is parsed for every supported mode`() {
-        WavePrefetchMode.entries.forEach { mode ->
-            assertEquals(mode, AutPlayRuntime.wavePrefetchMode(mode.name))
-        }
-        assertEquals(WavePrefetchMode.NEXT, AutPlayRuntime.wavePrefetchMode("UNKNOWN"))
+    fun `wave prefetch follows network quality and metered consent`() {
+        assertEquals(WavePrefetchMode.OFF, WaveConnection.OFFLINE.prefetch(true))
+        assertEquals(WavePrefetchMode.OFF, WaveConnection.METERED.prefetch(false))
+        assertEquals(WavePrefetchMode.NEXT, WaveConnection.METERED.prefetch(true))
+        assertEquals(WavePrefetchMode.NEXT, WaveConnection.LIMITED.prefetch(false))
+        assertEquals(WavePrefetchMode.NEXT_3, WaveConnection.FAST.prefetch(false))
     }
 
     @Test

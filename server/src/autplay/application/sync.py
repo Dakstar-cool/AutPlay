@@ -61,6 +61,7 @@ _BOOTSTRAP_INSERT_BATCH: Final = 1_000
 _OWNER_RECORDING_PAGE_SIZE: Final = 100
 CATALOG_EDITION_V1: Final = "CATALOG_EDITION_V1"
 PERSONAL_LIBRARY_V1: Final = "PERSONAL_LIBRARY_V1"
+PERSONAL_LIBRARY_V2: Final = "PERSONAL_LIBRARY_V2"
 CATALOG_ARTIST_ID_V1: Final = "CATALOG_ARTIST_ID_V1"
 _CATALOG_AGGREGATES: Final = frozenset(
     {"ARTIST", "ARTIST_CREDIT", "RECORDING_ARTIST_CREDIT", "RELEASE_ARTIST_CREDIT"}
@@ -742,6 +743,13 @@ class SyncService:
             if operation == "UPSERT" and isinstance(row, PlaylistEntryRow)
             else event["payload"]
         )
+        if isinstance(row, UserTrackPreferenceRow) and operation == "UPSERT":
+            published_payload = {
+                **published_payload,
+                "server_user_track_ref_id": str(row.user_track_ref_id),
+                "rating": row.rating,
+                "updated_at_ms": int(row.updated_at.timestamp() * 1000),
+            }
         if isinstance(row, UserTrackRefRow) and event["payload"].get("shared_playlist_id"):
             published_payload = {**published_payload, "resolution_status": "CATALOG_ONLY"}
         session.add(
@@ -1051,6 +1059,11 @@ class SyncService:
                 updated_at=now,
             )
             session.add(entry)
+            if payload.get("playlist_import") is True:
+                from autplay.application.playlist_vault import enqueue_playlist_track
+
+                enqueue_playlist_track(session, principal.user_id, playlist_id, ref_id,
+                                       complete=payload.get("playlist_import_complete") is True)
         else:
             if entry.playlist_id != playlist.playlist_id:
                 raise _ProjectionConflict
@@ -1093,11 +1106,13 @@ class SyncService:
                 str(token), user_id=principal.user_id, device_id=device_id, epoch=epoch
             )
         )
+        capabilities = _capabilities(body)
+        catalog_visible = _catalog_enabled(body)
         with self._sessions.begin() as session:
             cursor = session.get(DeviceSyncCursorRow, device_id)
             if cursor is None or cursor.journal_epoch != epoch:
                 raise SyncError("JOURNAL_RESET_REQUIRED")
-            if CATALOG_EDITION_V1 in _capabilities(body):
+            if CATALOG_EDITION_V1 in capabilities:
                 from autplay.adapters.postgresql.shared_catalog import (
                     refresh_playlist_catalog_handles,
                 )
@@ -1114,13 +1129,15 @@ class SyncService:
                     .limit(limit + 1)
                 )
             )
+            if PERSONAL_LIBRARY_V2 in capabilities:
+                limit = _mobile_page_size(rows, limit)
             page, more = rows[:limit], len(rows) > limit
             library_ids = [
                 row.aggregate_id
                 for row in page
                 if row.aggregate_type == "LIBRARY_ENTRY" and row.operation == "UPSERT"
             ]
-            personal_library = PERSONAL_LIBRARY_V1 in _capabilities(body)
+            personal_library = bool({PERSONAL_LIBRARY_V1, PERSONAL_LIBRARY_V2} & capabilities)
             catalog_only = (
                 _catalog_only_entries(session, principal.user_id, library_ids)
                 if personal_library
@@ -1148,15 +1165,16 @@ class SyncService:
             "journal_epoch": str(epoch),
             "from_cursor": token,
             "next_cursor": next_cursor,
-            **({"personal_library_version": 1} if personal_library else {}),
+            **({"personal_library_version": 2 if PERSONAL_LIBRARY_V2 in capabilities else 1} if personal_library else {}),
             "has_more": more,
             "events": [
                 _server_event(row, tombstones.get(row.event_id), catalog_only=catalog_only)
                 for row in page
-                if (_catalog_enabled(body) or row.aggregate_type not in _CATALOG_AGGREGATES)
+                if (row.event_type != "PORTABLE_TRACK_PREFERENCE_PROJECTED" or PERSONAL_LIBRARY_V2 in capabilities)
+                and (catalog_visible or row.aggregate_type not in _CATALOG_AGGREGATES)
                 and (
                     row.aggregate_type != "EDITION_TRACK"
-                    or CATALOG_EDITION_V1 in _capabilities(body)
+                    or CATALOG_EDITION_V1 in capabilities
                 )
             ],
             "server_time": _iso(_now()),
@@ -1192,7 +1210,8 @@ class SyncService:
                     principal.user_id,
                     include_catalog_artist=_catalog_enabled(body),
                     include_editions=CATALOG_EDITION_V1 in _capabilities(body),
-                    personal_library=PERSONAL_LIBRARY_V1 in _capabilities(body),
+                    personal_library=bool({PERSONAL_LIBRARY_V1, PERSONAL_LIBRARY_V2} & set(snapshot.capabilities)),
+                    include_preferences=PERSONAL_LIBRARY_V2 in snapshot.capabilities,
                 )
                 snapshot_rows = [
                     {
@@ -1249,7 +1268,8 @@ class SyncService:
                     .limit(_MAX_PULL + 1)
                 )
             )
-        page, has_more = items[:_MAX_PULL], len(items) > _MAX_PULL
+        limit = _mobile_page_size(items, _MAX_PULL) if PERSONAL_LIBRARY_V2 in snapshot.capabilities else _MAX_PULL
+        page, has_more = items[:limit], len(items) > limit
         next_ordinal = page[-1].ordinal if page else start
         # The first page owns capability negotiation.  Continuations are bound to
         # that frozen snapshot and must not silently filter rows when a retry omits
@@ -1273,8 +1293,8 @@ class SyncService:
             "journal_epoch": str(epoch),
             "snapshot_id": str(snapshot_id),
             **(
-                {"personal_library_version": 1}
-                if PERSONAL_LIBRARY_V1 in snapshot.capabilities
+                {"personal_library_version": 2 if PERSONAL_LIBRARY_V2 in snapshot.capabilities else 1}
+                if {PERSONAL_LIBRARY_V1, PERSONAL_LIBRARY_V2}.intersection(snapshot.capabilities)
                 else {}
             ),
             "snapshot_high_water_server_sequence": snapshot.high_water_server_sequence,
@@ -1921,6 +1941,7 @@ def _bootstrap_projections(
     include_catalog_artist: bool = False,
     include_editions: bool = False,
     personal_library: bool = False,
+    include_preferences: bool = False,
 ) -> list[tuple[str, UUID, int, Any]]:
     """Materialize live owner projections, never replaying patch event payloads."""
     values: list[tuple[str, UUID, int, Any]] = []
@@ -2090,7 +2111,44 @@ def _bootstrap_projections(
             (item.aggregate_type, item.aggregate_id, item.row_version, item.payload)
             for item in _edition_tracks(session, user_id)
         )
-    values.sort(key=lambda value: (value[0], str(value[1])))
+    if include_preferences:
+        preferences = session.scalars(
+            select(UserTrackPreferenceRow)
+            .join(UserTrackRefRow, UserTrackRefRow.user_track_ref_id == UserTrackPreferenceRow.user_track_ref_id)
+            .where(UserTrackRefRow.user_id == user_id, UserTrackRefRow.deleted_at.is_(None))
+        )
+        for pref in preferences:
+            values.append(("USER_TRACK_PREFERENCE", pref.user_track_ref_id, pref.row_version, {
+                "server_user_track_ref_id": str(pref.user_track_ref_id),
+                "preference": pref.preference,
+                "rating": pref.rating,
+                "excluded_from_taste": pref.excluded_from_taste,
+                "updated_at_ms": int(pref.updated_at.timestamp() * 1000),
+            }))
+
+        # Deliver personal rows and their references before recommendation-only catalogue data.
+        liked = {
+            payload["server_user_track_ref_id"] for kind, _, _, payload in values
+            if kind == "USER_TRACK_PREFERENCE" and payload["preference"] == "LIKED"
+        }
+        saved = {
+            payload["server_user_track_ref_id"] for kind, _, _, payload in values
+            if (kind == "LIBRARY_ENTRY" and payload.get("personal_save", True)) or kind == "PLAYLIST_ENTRY"
+        }
+
+        track_order = {"USER_TRACK_REF": 0, "LIBRARY_ENTRY": 1, "USER_TRACK_PREFERENCE": 2}
+
+        def library_order(item: tuple[str, UUID, int, Any]) -> tuple[int, str, int, str]:
+            kind, identity, _, payload = item
+            if kind in track_order:
+                ref = str(identity) if kind == "USER_TRACK_REF" else payload["server_user_track_ref_id"]
+                priority = 0 if ref in liked else 1 if ref in saved else 2
+                return (priority, ref, track_order[kind], str(identity))
+            return (3, kind, 0, str(identity))
+
+        values.sort(key=library_order)
+    else:
+        values.sort(key=lambda value: (value[0], str(value[1])))
     return values
 
 
@@ -2173,6 +2231,18 @@ def _edition_tracks(
     return projections
 
 
+def _mobile_page_size(rows: list[SyncEventRow] | list[BootstrapSnapshotItemRow], limit: int) -> int:
+    # Android bounds the decoded response to 2 MiB. Reserve space for the envelope,
+    # cursors and per-row identifiers even when a whole page carries rich metadata.
+    remaining = 1_800_000
+    for index, row in enumerate(rows[:limit]):
+        size = len(json.dumps(row.payload, ensure_ascii=False).encode("utf-8")) + 1024
+        if index and size > remaining:
+            return index
+        remaining -= size
+    return limit
+
+
 def _capabilities(body: dict[str, Any]) -> set[str]:
     """Accept only a small additive capability vocabulary; unknown values remain inert."""
     values = body.get("capabilities", [])
@@ -2181,7 +2251,7 @@ def _capabilities(body: dict[str, Any]) -> set[str]:
     return {
         item
         for item in values
-        if item in (CATALOG_ARTIST_ID_V1, CATALOG_EDITION_V1, PERSONAL_LIBRARY_V1)
+        if item in (CATALOG_ARTIST_ID_V1, CATALOG_EDITION_V1, PERSONAL_LIBRARY_V1, PERSONAL_LIBRARY_V2)
     }
 
 

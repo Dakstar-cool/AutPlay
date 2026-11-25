@@ -1,6 +1,7 @@
 """One explicitly injected catalogue provider over an owned, globally gated transport."""
 
-from typing import Any, Protocol
+from datetime import date
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from autplay.domain.music_discovery import MusicDiscoveryKind, MusicDiscoveryPage
@@ -23,4 +24,11 @@ class MusicDiscoveryProvider(Protocol):
 
     def release_tracks(
         self, release_id: UUID, *, limit: int, offset: int
+    ) -> MusicDiscoveryPage: ...
+
+
+@runtime_checkable
+class DatedArtistReleases(Protocol):
+    def recent_artist_releases(
+        self, artist_id: UUID, start: date, end: date, *, limit: int, offset: int
     ) -> MusicDiscoveryPage: ...

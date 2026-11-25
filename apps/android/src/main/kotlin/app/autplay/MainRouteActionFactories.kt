@@ -78,6 +78,9 @@ internal fun buildNowPlayingRouteActions(
     togglePlayPause = playbackActions::toggleDirectPlayPause,
     toggleShuffle = playbackActions::toggleDirectShuffle,
     cycleRepeat = playbackActions::cycleDirectRepeatMode,
+    retryPhoneAudio = { entry ->
+        scope.launch { playbackOwner.dispatch(PlaybackCommand.RetryPhoneAudio(LocalId(entry))) }
+    },
     previous = {
         scope.launch {
             runCatching { playbackOwner.dispatch(PlaybackCommand.Previous) }
@@ -654,7 +657,7 @@ internal fun buildLegacySecondaryRouteActions(
         selfPairing = selfPairingActions,
         accountRecovery = accountRecoveryActions,
         accountDeletion = accountDeletionActions,
-        startDiscovery = profilePairingRuntime::startDiscovery,
+        startDiscovery = { origin -> scope.launch { profilePairingRuntime.connectToServer(origin) } },
         scanServerQr = scanServerQr,
         confirmTrust = profilePairingRuntime::confirmTrust,
         cancelPairing = {

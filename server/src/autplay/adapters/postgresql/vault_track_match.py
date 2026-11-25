@@ -11,6 +11,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
 
 from autplay.adapters.postgresql.shared_catalog import PUBLISHED_AUDIO, ensure_catalog_refs
+from autplay.adapters.postgresql.stage_credits import CATALOG_MEMBERS
 from autplay.adapters.postgresql.vault_runtime import PostgresVaultRuntime
 from autplay.application.vault_uploads import VaultNotFoundError, VaultPrincipal
 from autplay.domain.import_identity import normalize_text
@@ -93,7 +94,7 @@ def owned_match(
 def published_match(session: Session, candidate: Mapping[str, Any]) -> RowMapping | None:
     rows = session.execute(
         text(f"""
-        SELECT p.*, r.title, a.display_name AS artist, r.version_text, v.duration_ms
+        SELECT p.*, r.title, a.display_name AS artist, r.version_text, v.duration_ms, {CATALOG_MEMBERS} AS members
         FROM ({PUBLISHED_AUDIO}) p
         JOIN catalog.recording r USING (recording_id)
         JOIN catalog.artist_credit a USING (artist_credit_id)

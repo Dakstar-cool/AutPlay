@@ -345,7 +345,7 @@ private fun AutPlayTopBar(
 ) {
     CenterAlignedTopAppBar(
         title = {
-            if (!immersive) {
+            if (!immersive && destination != UiDestination.Home) {
                 Text(
                     stringResource(topBarTitle(destination)),
                     style = MaterialTheme.typography.titleLarge,
@@ -357,7 +357,10 @@ private fun AutPlayTopBar(
         navigationIcon = {
             if (canNavigateBack && destination != UiDestination.Home) {
                 AutPlayIconButton(AutPlayIcon.Back, R.string.action_back, onNavigateBack)
-            } else if (!immersive) {
+            }
+        },
+        actions = {
+            if (destination != UiDestination.NowPlaying) {
                 AutPlayIconButton(AutPlayIcon.Profile, R.string.action_open_profile_settings, onSettingsClick)
             }
         },

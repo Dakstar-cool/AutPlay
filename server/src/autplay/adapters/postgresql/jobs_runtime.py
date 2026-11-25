@@ -204,8 +204,9 @@ _CANCEL_PENDING_JOB = text(
 class PostgresJobRepository:
     """Implement durable job operations inside a caller-owned ``Session``."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, claim_owner: UUID | None = None) -> None:
         self._session = session
+        self._claim_owner = claim_owner
 
     def enqueue(self, command: EnqueueJob) -> EnqueueResult:
         """Insert or safely replay one job without committing the transaction."""
@@ -276,7 +277,11 @@ class PostgresJobRepository:
             )
             params[f"job_type_{index}"] = key.job_type
             params[f"schema_version_{index}"] = key.schema_version
-        statement = text(_claim_sql(" OR ".join(predicates))).bindparams(
+        predicate = " OR ".join(predicates)
+        if self._claim_owner is not None:
+            predicate = f"({predicate}) AND j.user_id = :claim_owner"
+            params["claim_owner"] = self._claim_owner
+        statement = text(_claim_sql(predicate)).bindparams(
             bindparam("lease_interval", type_=INTERVAL())
         )
         rows = self._session.execute(statement, params).mappings().all()

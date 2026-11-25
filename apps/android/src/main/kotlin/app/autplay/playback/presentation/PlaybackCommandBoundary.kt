@@ -11,7 +11,7 @@ internal interface PlaybackCommandPort {
     val sourceAvailable: Boolean
     val isPlaying: Boolean
     var shuffleModeEnabled: Boolean
-    var repeatMode: Int
+    fun cycleTrackRepeat(entry: String)
 
     fun isCommandAvailable(command: Int): Boolean
     fun seekTo(positionMs: Long)
@@ -22,6 +22,7 @@ internal interface PlaybackCommandPort {
 /** Media3 adapter kept private to the playback-presentation package. */
 internal class MediaControllerCommandPort(
     private val controller: MediaController,
+    private val sendRepeat: (String) -> Unit,
 ) : PlaybackCommandPort {
     override val mediaId: String?
         get() = controller.currentMediaItem?.mediaId
@@ -34,11 +35,7 @@ internal class MediaControllerCommandPort(
         set(value) {
             controller.shuffleModeEnabled = value
         }
-    override var repeatMode: Int
-        get() = controller.repeatMode
-        set(value) {
-            controller.repeatMode = value
-        }
+    override fun cycleTrackRepeat(entry: String) = sendRepeat(entry)
 
     override fun isCommandAvailable(command: Int): Boolean = controller.isCommandAvailable(command)
 
@@ -96,11 +93,7 @@ internal object PlaybackCommandBoundary {
 
     fun cycleRepeatMode(port: PlaybackCommandPort, context: ActiveQueueContext): Boolean {
         if (!isAllowed(port, context, Player.COMMAND_SET_REPEAT_MODE)) return false
-        port.repeatMode = when (port.repeatMode) {
-            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
-            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-            else -> Player.REPEAT_MODE_OFF
-        }
+        port.cycleTrackRepeat(port.mediaId ?: return false)
         return true
     }
 

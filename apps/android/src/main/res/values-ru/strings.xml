@@ -19,6 +19,7 @@
     <string name="action_back">Назад</string>
     <string name="action_open_settings">Открыть настройки</string>
 
+    <string name="onboarding_sign_in_title">Вход в аккаунт</string>
     <string name="onboarding_welcome_title">Ваш локальный аккаунт</string>
     <string name="onboarding_welcome_body">Аккаунт объединяет историю и плейлисты. Пароль защищает доступ к нему.</string>
     <string name="onboarding_continue_local">Создать аккаунт и продолжить</string>
@@ -84,6 +85,8 @@
     <string name="library_add_local_success">Трек «%1$s» добавлен в локальную коллекцию</string>
     <string name="library_empty_body">Выберите папку с музыкой или добавьте локальный трек.</string>
     <string name="library_unknown_artist">Неизвестный исполнитель</string>
+    <string name="library_on_device">С устройства</string>
+    <string name="library_on_device_empty">Пока нет аудиофайлов с этого устройства</string>
     <string name="library_favorites_shortcut">Избранное</string>
     <string name="library_favorites_empty">В избранном пока нет треков</string>
     <string name="library_sort_label">Сортировка</string>
@@ -168,7 +171,8 @@
     <string name="player_seek_description">Позиция воспроизведения</string>
     <string name="player_shuffle">Перемешать</string>
     <string name="player_repeat_off">Повтор выключен</string>
-    <string name="player_repeat_one">Повтор трека</string>
+    <string name="player_repeat_once">Повторить трек один раз</string>
+    <string name="player_repeat_one">Повторять трек постоянно</string>
     <string name="player_repeat_all">Повтор очереди</string>
     <string name="player_progress_description">%1$s из %2$s</string>
     <string name="player_controls_unavailable">Управление недоступно для этого трека.</string>
@@ -387,7 +391,7 @@
     <string name="profile_connection_local">Не подключено — локальный режим продолжает работать</string>
     <string name="profile_server_origin">Адрес сервера</string>
     <string name="profile_server_origin_hint">Используйте приватный адрес, полученный от администратора сервера.</string>
-    <string name="profile_check_server">Проверить сервер</string>
+    <string name="profile_check_server">Подключиться к серверу</string>
     <string name="profile_scan_server_qr">Сканировать QR сервера</string>
     <string name="profile_connection_checking">Проверяем сервер</string>
     <string name="profile_connection_trust">Подтвердите доверие к серверу</string>
@@ -660,7 +664,8 @@
     <string name="variation_live">Концертные</string>
     <string name="variation_skips_count">%1$d / %2$d</string>
     <string name="detail_collection_listen">Слушать</string>
-    <string name="detail_artist_popular">Вы часто слушаете</string>
+    <string name="detail_artist_popular">Вы слушали у этого исполнителя</string>
+    <string name="artist_track_heard">Вы слушали</string>
     <string name="detail_finish_edit">Готово</string>
     <string name="detail_open_artist">Открыть исполнителя</string>
     <string name="detail_artist_info">Об исполнителе</string>

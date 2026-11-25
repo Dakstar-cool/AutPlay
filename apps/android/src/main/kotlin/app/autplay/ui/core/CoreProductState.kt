@@ -103,6 +103,7 @@ public enum class LibrarySort {
 public enum class LibraryFilter {
     All,
     Loved,
+    OnDevice,
     Downloaded,
     Available,
     Unavailable,
@@ -254,6 +255,7 @@ public data class CoreTrackSummary(
     public val downloaded: Boolean,
     public val availability: TrackAvailability,
     public val canRemove: Boolean = true,
+    public val onDevice: Boolean = false,
 )
 
 public fun filterAndSortTracks(
@@ -265,6 +267,7 @@ public fun filterAndSortTracks(
         when (filter) {
             LibraryFilter.All -> true
             LibraryFilter.Loved -> track.loved
+            LibraryFilter.OnDevice -> track.onDevice
             LibraryFilter.Downloaded -> track.downloaded
             LibraryFilter.Available -> track.availability == TrackAvailability.Available
             LibraryFilter.Unavailable -> track.availability != TrackAvailability.Available

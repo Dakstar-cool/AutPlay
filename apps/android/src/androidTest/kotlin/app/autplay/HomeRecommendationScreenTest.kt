@@ -195,7 +195,7 @@ class HomeRecommendationScreenTest {
                     serverReleaseGroupId = null,
                     title = "Relevant release",
                     displayArtist = "AutPlay Artist",
-                    releaseDateText = "2026-08-17",
+                    releaseDateText = java.time.LocalDate.now().toString(),
                     releaseType = "ALBUM",
                     artworkRef = null,
                     catalogVersion = 7,
@@ -259,6 +259,15 @@ class HomeRecommendationScreenTest {
                 serverProfileId = PROFILE,
             ),
         )
+        val base = requireNotNull(db.libraryDao().trackRef(TRACK))
+        for (i in 1L..3L) {
+            val track = java.util.UUID(0, i).toString()
+            db.libraryDao().upsertTrackRef(base.copy(localUserTrackRefId = track, serverUserTrackRefId = null,
+                localRecordingId = null, serverRecordingId = null, rawTitle = "Liked song $i",
+                rawArtist = "AutPlay Artist", resolutionStatus = "UNRESOLVED"))
+            db.libraryDao().upsertPreference(app.autplay.data.local.entity.UserTrackPreferenceEntity(
+                track, "LIKED", null, false, "SYNCED", 0, NOW, PROFILE))
+        }
     }
 
     private fun pack(): RecommendationPackEntity {

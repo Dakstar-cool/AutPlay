@@ -13,6 +13,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** Media3 is the sole owner of long-running offline transfer execution and progress. */
 @UnstableApi
@@ -25,16 +27,20 @@ class AutPlayDownloadService : DownloadService(
 ) {
     private lateinit var repository: DownloadIntentRepository
     private val listener = object : DownloadManager.Listener {
+        override fun onInitialized(manager: DownloadManager) {
+            reconciliationScope.launch { reconciliationMutex.withLock { repository.reconcileAll(manager, System.currentTimeMillis()) } }
+        }
         override fun onDownloadChanged(manager: DownloadManager, download: androidx.media3.exoplayer.offline.Download, finalException: Exception?) {
-            reconciliationScope.launch { repository.reconcile(download, finalException, System.currentTimeMillis()) }
+            reconciliationScope.launch { reconciliationMutex.withLock { repository.reconcile(download, finalException, System.currentTimeMillis()) } }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
         repository = DownloadIntentRepository(applicationContext, AutPlayRuntime.database(applicationContext))
-        getDownloadManager().addListener(listener)
-        reconciliationScope.launch { repository.reconcileAll(getDownloadManager(), System.currentTimeMillis()) }
+        val manager = getDownloadManager()
+        manager.addListener(listener)
+        if (manager.isInitialized) reconciliationScope.launch { reconciliationMutex.withLock { repository.reconcileAll(manager, System.currentTimeMillis()) } }
     }
 
     override fun onDestroy() {
@@ -56,7 +62,8 @@ class AutPlayDownloadService : DownloadService(
     private companion object {
         // Completion reconciliation must outlive a service instance. Media3 may stop the service
         // immediately after the terminal callback; startup reconciliation covers process death.
-        val reconciliationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val reconciliationMutex = Mutex()
+        val reconciliationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         const val DOWNLOAD_CHANNEL_ID = "autplay_downloads"
         const val FOREGROUND_NOTIFICATION_ID = 2201
         const val PLATFORM_SCHEDULER_JOB_ID = 2202

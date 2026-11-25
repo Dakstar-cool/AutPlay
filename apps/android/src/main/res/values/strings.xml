@@ -19,6 +19,7 @@
     <string name="action_back">Back</string>
     <string name="action_open_settings">Open settings</string>
 
+    <string name="onboarding_sign_in_title">Sign in to your account</string>
     <string name="onboarding_welcome_title">Your local account</string>
     <string name="onboarding_welcome_body">Your account keeps your history and playlists together. A password protects access to it.</string>
     <string name="onboarding_continue_local">Create account and continue</string>
@@ -82,6 +83,8 @@
     <string name="library_add_local_success">Added “%1$s” to the local collection</string>
     <string name="library_empty_body">Choose a music folder or add a local track to get started.</string>
     <string name="library_unknown_artist">Unknown artist</string>
+    <string name="library_on_device">On device</string>
+    <string name="library_on_device_empty">No audio files from this device yet</string>
     <string name="library_favorites_shortcut">Favorites</string>
     <string name="library_favorites_empty">No favorite tracks yet</string>
     <string name="library_sort_label">Sort</string>
@@ -164,7 +167,8 @@
     <string name="player_seek_description">Playback position</string>
     <string name="player_shuffle">Shuffle</string>
     <string name="player_repeat_off">Repeat off</string>
-    <string name="player_repeat_one">Repeat one</string>
+    <string name="player_repeat_once">Repeat this track once</string>
+    <string name="player_repeat_one">Repeat this track continuously</string>
     <string name="player_repeat_all">Repeat all</string>
     <string name="player_progress_description">%1$s of %2$s</string>
     <string name="player_controls_unavailable">Controls are unavailable for this item.</string>
@@ -379,7 +383,7 @@
     <string name="profile_connection_local">Not connected — local mode continues</string>
     <string name="profile_server_origin">Server address</string>
     <string name="profile_server_origin_hint">Use the private address supplied by your server administrator.</string>
-    <string name="profile_check_server">Check server</string>
+    <string name="profile_check_server">Connect to server</string>
     <string name="profile_scan_server_qr">Scan server QR</string>
     <string name="profile_connection_checking">Checking server</string>
     <string name="profile_connection_trust">Confirm server trust</string>
@@ -638,7 +642,8 @@
     <string name="variation_live">Live</string>
     <string name="variation_skips_count">%1$d / %2$d</string>
     <string name="detail_collection_listen">Listen</string>
-    <string name="detail_artist_popular">Your most played</string>
+    <string name="detail_artist_popular">Tracks you’ve heard by this artist</string>
+    <string name="artist_track_heard">Previously played</string>
     <string name="detail_finish_edit">Done</string>
     <string name="detail_open_artist">Open artist</string>
     <string name="detail_artist_info">About the artist</string>

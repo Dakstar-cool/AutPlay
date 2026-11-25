@@ -13,6 +13,7 @@ from autplay.adapters.postgresql.models import (
     PlaylistEntryRow,
     PlaylistRow,
     PortableAccountRecordRow,
+    SyncEventRow,
     UserTrackPreferenceRow,
     UserTrackRefRow,
 )
@@ -187,6 +188,12 @@ def test_legacy_account_moves_between_servers_with_stable_domain_copies(
             applied_track = session.get(UserTrackRefRow, applied_entry.user_track_ref_id)
             assert applied_track is not None and applied_track.recording_id is None
             assert applied_track.resolution_status == "UNRESOLVED"
+            update = session.scalars(select(SyncEventRow).where(
+                SyncEventRow.user_id == owner,
+                SyncEventRow.event_type == "PORTABLE_TRACK_PREFERENCE_PROJECTED",
+            )).one()
+            assert update.payload["server_user_track_ref_id"] == str(applied_track.user_track_ref_id)
+            assert update.payload["preference"] == "LIKED"
             assert session.scalar(text("SELECT count(*) FROM vault.acquisition_record")) == 0
         for name in ("history", "preferences", "playlists", "playlist_entries", "tastes"):
             moved = cast(

@@ -6,6 +6,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import app.autplay.application.artist.ArtistAppearance
 import app.autplay.application.artist.ArtistCatalogPort
@@ -15,12 +16,17 @@ import app.autplay.application.artist.ArtistId
 import app.autplay.application.artist.ArtistKey
 import app.autplay.application.library.CorePlaylistDetail
 import app.autplay.application.library.CoreProductRepository
+import app.autplay.application.artist.ArtistLocalTarget
+import app.autplay.application.library.CoreReleaseSummary
 import app.autplay.application.library.CoreReleaseDetail
 import app.autplay.application.library.CoreTrackDetail
 import app.autplay.ui.core.DetailKind
 import app.autplay.ui.core.DetailTarget
 import app.autplay.domain.ServerProfileId
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.collectLatest
 
 internal data class OfflineDetailRequestKey(
@@ -40,14 +46,33 @@ internal class OfflineDetailRequestGuard(initialGeneration: Long = 0L) {
     fun accepts(key: OfflineDetailRequestKey): Boolean = active == key
 }
 
+private val artistDetailKinds = setOf(DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistCollaborations, DetailKind.ArtistAlbums)
+
+internal data class CachedArtistPage(
+    val artist: ArtistDetail,
+    val appearances: List<ArtistAppearance> = emptyList(),
+    val albums: List<CoreReleaseSummary> = emptyList(),
+    val completedRevision: Long? = null,
+)
+
+internal class ArtistPageCache {
+    val pages = object : LinkedHashMap<ArtistKey, CachedArtistPage>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ArtistKey, CachedArtistPage>?): Boolean = size > 8
+    }
+    var revision by mutableStateOf(0L)
+        private set
+
+    fun invalidate() { revision++ }
+}
+
 /** Keeps detail loading data-flow out of the root Compose declaration. */
 @Stable
-internal class OfflineCoreDetailState {
+internal class OfflineCoreDetailState(private val artistCache: ArtistPageCache = ArtistPageCache()) {
     var track: CoreTrackDetail? by mutableStateOf(null)
     var release: CoreReleaseDetail? by mutableStateOf(null)
     var playlist: CorePlaylistDetail? by mutableStateOf(null)
     var artist: ArtistDetail? by mutableStateOf(null)
-    var artistAlbums: List<app.autplay.application.library.CoreReleaseSummary> by mutableStateOf(emptyList())
+    var artistAlbums: List<CoreReleaseSummary> by mutableStateOf(emptyList())
     var artistAppearances: List<ArtistAppearance> by mutableStateOf(emptyList())
     var subjectArtistCredits: List<ArtistCredit> by mutableStateOf(emptyList())
     var loading: Boolean by mutableStateOf(false)
@@ -55,12 +80,32 @@ internal class OfflineCoreDetailState {
     var loadedContextKey: String? by mutableStateOf(null)
     var loadedTarget: DetailTarget? by mutableStateOf(null)
     private val requestGuard = OfflineDetailRequestGuard()
+    var artistContentLoading by mutableStateOf(false)
+        private set
+
+    private fun showArtist(page: CachedArtistPage, contextKey: String, target: DetailTarget) {
+        artist = page.artist
+        artistAppearances = page.appearances
+        artistAlbums = page.albums
+        artistContentLoading = page.completedRevision == null
+        loading = false
+        error = false
+        loadedContextKey = contextKey
+        loadedTarget = target
+    }
+
+    fun restoreArtist(profileId: String?, contextKey: String, target: DetailTarget?) {
+        if (target == null || target.kind !in artistDetailKinds) return
+        val key = runCatching { ArtistKey(app.autplay.application.artist.artistScope(profileId), ArtistId(target.stableId)) }.getOrNull()
+        key?.let { artistCache.pages[it] }?.let { showArtist(it, contextKey, target) }
+    }
 
     private fun reset(target: DetailTarget?) {
         track = null
         release = null
         playlist = null
         artist = null
+        artistContentLoading = false
         artistAlbums = emptyList()
         artistAppearances = emptyList()
         subjectArtistCredits = emptyList()
@@ -110,14 +155,38 @@ internal class OfflineCoreDetailState {
                 }
                 DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistCollaborations, DetailKind.ArtistAlbums -> {
                     val key = ArtistKey(app.autplay.application.artist.artistScope(profileId), ArtistId(target.stableId))
-                    val loadedArtist = artistCatalogPort.detail(key, MAX_ARTIST_CREDITS, MAX_ARTIST_CREDIT_MEMBERS)
-                    val appearances = artistCatalogPort.allAppearances(key)
-                    val trackIds = appearances.mapNotNull { (it.localTarget as? app.autplay.application.artist.ArtistLocalTarget.Track)?.localUserTrackRefId }.toSet()
-                    val albums = repository.artistReleases(profileId ?: "legacy-unscoped", trackIds)
-                    if (requestGuard.accepts(request)) {
-                        artistAlbums = albums
-                        artist = loadedArtist
-                        artistAppearances = appearances
+                    val revision = artistCache.revision
+                    val previous = artistCache.pages[key]
+                    if (previous != null) showArtist(previous, contextKey, target)
+                    if (previous?.completedRevision == revision) return
+
+                    var detail: ArtistDetail? = null
+                    val appearances = artistCatalogPort.loadArtistPage(key, MAX_ARTIST_CREDITS, MAX_ARTIST_CREDIT_MEMBERS) {
+                        detail = it
+                        if (previous?.completedRevision == null && requestGuard.accepts(request)) {
+                            val header = CachedArtistPage(it, previous?.appearances.orEmpty())
+                            artistCache.pages[key] = header
+                            showArtist(header, contextKey, target)
+                        }
+                    }
+                    if (!requestGuard.accepts(request)) return
+                    if (appearances == null) {
+                        artistCache.pages.remove(key)
+                        reset(target)
+                    } else {
+                        val partial = CachedArtistPage(requireNotNull(detail), appearances)
+                        if (previous?.completedRevision == null) {
+                            artistCache.pages[key] = partial
+                            showArtist(partial, contextKey, target)
+                        }
+                        val albums = withContext(Dispatchers.Default) {
+                            val tracks = appearances.mapNotNull { (it.localTarget as? ArtistLocalTarget.Track)?.localUserTrackRefId }.toSet()
+                            repository.artistReleases(profileId ?: "legacy-unscoped", tracks)
+                        }
+                        if (!requestGuard.accepts(request)) return
+                        val page = partial.copy(albums = albums, completedRevision = revision)
+                        artistCache.pages[key] = page
+                        showArtist(page, contextKey, target)
                     }
                 }
             }
@@ -125,7 +194,8 @@ internal class OfflineCoreDetailState {
             throw cancelled
         } catch (_: Exception) {
             if (requestGuard.accepts(request)) {
-                error = true
+                error = artist == null
+                artistContentLoading = false
                 loading = false
                 loadedContextKey = contextKey
                 loadedTarget = target
@@ -148,7 +218,9 @@ internal class OfflineCoreDetailState {
     }
 
     internal fun matches(contextKey: String, target: DetailTarget?): Boolean =
-        loadedContextKey == contextKey && loadedTarget == target
+        loadedContextKey == contextKey && (loadedTarget == target ||
+            (target != null && target.kind in artistDetailKinds && loadedTarget?.kind in artistDetailKinds &&
+                loadedTarget?.stableId == target.stableId))
 
     private suspend fun loadSubjectCredits(
         artistCatalogPort: ArtistCatalogPort,
@@ -183,15 +255,25 @@ internal fun rememberOfflineCoreDetailState(
     target: DetailTarget?,
     profileId: String?,
     contextKey: String,
+    ownerKey: String,
     reportError: (String) -> Unit,
 ): OfflineCoreDetailState {
-    val state = remember(contextKey) { OfflineCoreDetailState() }
-    LaunchedEffect(target, profileId, contextKey) {
-        if (target?.kind == DetailKind.Track) {
+    val cache = remember(ownerKey, profileId, repository, artistCatalogPort) { ArtistPageCache() }
+    LaunchedEffect(cache) { repository.artistChanges().collect { cache.invalidate() } }
+    val route = if (target != null && target.kind in artistDetailKinds) DetailTarget(DetailKind.Artist, target.stableId) else target
+    val state = remember(cache, contextKey, route) {
+        OfflineCoreDetailState(cache).also { it.restoreArtist(profileId, contextKey, route) }
+    }
+    LaunchedEffect(state) {
+        if (route?.kind == DetailKind.Artist) {
+            snapshotFlow { cache.revision }.conflate().collect {
+                state.load(repository, artistCatalogPort, route, profileId, contextKey, reportError)
+            }
+        } else if (target?.kind == DetailKind.Track) {
             repository.trackMetadataChanges(target.stableId, profileId).collectLatest {
                 state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
             }
-        } else if (target?.kind in setOf(DetailKind.Release, DetailKind.Playlist, DetailKind.Artist, DetailKind.ArtistTracks, DetailKind.ArtistCollaborations, DetailKind.ArtistAlbums)) {
+        } else if (target?.kind in setOf(DetailKind.Release, DetailKind.Playlist)) {
             repository.releaseChanges().collectLatest {
                 state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
             }
@@ -211,9 +293,12 @@ internal data class ArtistPopularity(
 @Composable
 internal fun rememberArtistRanking(context: android.content.Context, binding: app.autplay.application.sync.ClientEventBinding?,
     artist: String?): ArtistPopularity {
-    var counts by remember(binding, artist) { mutableStateOf(ArtistPopularity(loading = binding != null && artist != null)) }
+    val recent = remember(binding) { android.util.LruCache<String, Pair<Long, ArtistPopularity>>(8) }
+    val saved = remember(recent, artist) { artist?.let(recent::get) }
+    var counts by remember(recent, artist) { mutableStateOf(saved?.second ?: ArtistPopularity(loading = binding != null && artist != null)) }
     LaunchedEffect(binding, artist) {
         if (binding == null || artist == null) return@LaunchedEffect
+        if (saved != null && android.os.SystemClock.elapsedRealtime() - saved.first < 60_000L) return@LaunchedEffect
         if (runCatching { java.util.UUID.fromString(artist) }.isFailure) {
             counts = ArtistPopularity()
             return@LaunchedEffect
@@ -229,28 +314,39 @@ internal fun rememberArtistRanking(context: android.content.Context, binding: ap
             return ArtistPopularity((value["artist_mbid"] as? kotlinx.serialization.json.JsonPrimitive)?.content,
                 counts("counts"), counts("recording_counts"), identities)
         }
+        fun publish(value: ArtistPopularity) {
+            counts = value
+            recent.put(artist, android.os.SystemClock.elapsedRealtime() to value)
+        }
         try {
             val cached = dao.catalogPage(profile, key)
             val previous = cached ?: dao.catalogPage(profile, "ranking:${binding.userId.value}:$artist")
-            if (previous != null) {
-                counts = decode(kotlinx.serialization.json.Json.parseToJsonElement(previous.document) as kotlinx.serialization.json.JsonObject)
-                if (cached != null && System.currentTimeMillis() - cached.observedAtMs in 0 until 3_600_000L) return@LaunchedEffect
+            val prior = previous?.let { row -> withContext(Dispatchers.Default) {
+                runCatching {
+                    val json = kotlinx.serialization.json.Json.parseToJsonElement(row.document) as kotlinx.serialization.json.JsonObject
+                    json to decode(json)
+                }.getOrNull()
+            } }
+            if (prior != null) {
+                counts = prior.second
+                if (cached != null && System.currentTimeMillis() - cached.observedAtMs in 0 until 3_600_000L) {
+                    publish(prior.second)
+                    return@LaunchedEffect
+                }
             }
             val document = AutPlayRuntime.serverFeatures(context, binding).artistRanking(artist)
             if (document["ranking_available"]?.toString() == "false") {
-                val identity = decode(document)
+                val identity = withContext(Dispatchers.Default) { decode(document) }
                 val sameArtist = counts.artistMbid == identity.artistMbid
-                counts = if (sameArtist) identity.copy(
-                    counts = counts.counts, publicCounts = counts.publicCounts) else identity
-                val saved = if (previous != null && sameArtist) {
-                    val prior = kotlinx.serialization.json.Json.parseToJsonElement(previous.document) as kotlinx.serialization.json.JsonObject
-                    kotlinx.serialization.json.JsonObject(document + prior.filterKeys { it == "counts" || it == "recording_counts" })
+                publish(if (sameArtist) identity.copy(counts = counts.counts, publicCounts = counts.publicCounts) else identity)
+                val merged = if (prior != null && sameArtist) {
+                    kotlinx.serialization.json.JsonObject(document + prior.first.filterKeys { it == "counts" || it == "recording_counts" })
                 } else document
-                dao.putCatalogPage(app.autplay.data.local.entity.CatalogPage(profile, key, saved.toString(), 0L))
+                dao.putCatalogPage(app.autplay.data.local.entity.CatalogPage(profile, key, merged.toString(), 0L))
                 dao.trimCatalogPages(profile)
                 return@LaunchedEffect
             }
-            counts = decode(document)
+            publish(withContext(Dispatchers.Default) { decode(document) })
             dao.putCatalogPage(app.autplay.data.local.entity.CatalogPage(profile, key, document.toString(), System.currentTimeMillis()))
             dao.trimCatalogPages(profile)
         } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { counts = counts.copy(loading = false) }

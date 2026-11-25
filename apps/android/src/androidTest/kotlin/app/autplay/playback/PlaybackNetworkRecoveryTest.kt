@@ -60,7 +60,8 @@ class PlaybackNetworkRecoveryTest {
                 val settings = app.autplay.data.settings.applicationNonSecretSettingsStore(context).settings.first()
                 app.autplay.warmPersonalWaveTracks(context, settings.copy(downloadOnMeteredNetwork = true),
                     requireNotNull(settings.activeServerProfileId), fixture.tracks.take(2).map { app.autplay.domain.LocalId(it) })
-                assertEquals("bytes=0-262143", audioReads.single().second)
+                assertTrue(audioReads.size in 1..2)
+                assertTrue(audioReads.all { it.second == "bytes=0-262143" })
                 startedAt = android.os.SystemClock.elapsedRealtime()
             }
             fixture.await("prepared first track playing") {

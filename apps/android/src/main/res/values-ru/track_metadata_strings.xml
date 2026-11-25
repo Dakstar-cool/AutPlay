@@ -3,6 +3,7 @@
     <string name="metadata_heading">Сведения о треке</string>
     <string name="metadata_title_field">Название</string>
     <string name="metadata_artist">Исполнитель</string>
+    <string name="metadata_composer">Композитор</string>
     <string name="metadata_album_artist">Исполнитель альбома</string>
     <string name="metadata_release_date">Дата выпуска издания</string>
     <string name="metadata_first_release">Первый выпуск</string>
@@ -18,6 +19,7 @@
     <string name="metadata_failed">Не удалось обновить. Прежние сведения сохранены.</string>
     <string name="metadata_missing">Дополнительные сведения ещё не загружены</string>
     <string name="metadata_manual">Вручную</string>
+    <string name="metadata_from_source_label">Исходное название</string>
     <string name="metadata_from_file">Из файла</string>
     <string name="metadata_command_failed">Не удалось применить изменение. Обновите сведения и повторите.</string>
     <string name="metadata_refresh">Обновить</string>

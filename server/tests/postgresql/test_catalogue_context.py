@@ -717,7 +717,7 @@ def test_migration_preserves_old_snapshot_and_refuses_receipt_loss(
             (search_id, owner, b"r" * 32),
         )
         head_before = conn.execute("SELECT version_num FROM alembic_version").fetchone()
-        assert head_before == ("0078_playlist_snapshots",)
+        assert head_before == ("0079_music_preservation",)
         purge_before = conn.execute(
             "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
         ).fetchone()

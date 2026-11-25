@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
 from autplay.adapters.postgresql.catalog_pages import CatalogPageCache
+from autplay.application.artist_overview import artist_overview_view, build_artist_overview
 from autplay.application.music_discovery import MusicDiscoveryService
 from autplay.application.music_library import MusicError
 from autplay.domain.auth import AccountRole, Principal
@@ -198,7 +201,6 @@ def test_official_artist_releases_advance_over_filtered_editions() -> None:
 
 
 def test_ranking_failure_preserves_artist_identity_and_skips_unrelated_recordings() -> None:
-    import json
 
     artist, recording, internal, unrelated = (uuid4() for _ in range(4))
     owner = Principal(uuid4(), uuid4(), uuid4(), AccountRole.USER)
@@ -239,3 +241,93 @@ def test_ranking_failure_preserves_artist_identity_and_skips_unrelated_recording
     service.read_public = lambda *_: None
     unavailable = service.artist_ranking(owner, artist)
     assert unavailable["artist_mbid"] == str(artist) and unavailable["ranking_available"] is False
+
+
+def test_artist_snapshot_updates_latest_without_rereading_tracks_or_replacing_editions() -> None:
+    artist, edition, alternate, group = (uuid4() for _ in range(4))
+    today = date(2026, 11, 25)
+    calls: list[tuple[date, date, int]] = []
+
+    class WithReleases(Provider):
+        def recent_artist_releases(
+            self, artist_id: UUID, start: date, end: date, *, limit: int, offset: int
+        ) -> MusicDiscoveryPage:
+            assert artist_id == artist
+            calls.append((start, end, offset))
+            identity = alternate if offset else edition
+            card = MusicDiscoveryCard(
+                MusicDiscoveryEntity.RELEASE, identity, "Album", release_id=identity,
+                release_date="2026-11-25" if offset else "2026-11-24", release_group_id=group,
+            )
+            return MusicDiscoveryPage((card,), limit, offset, 2, 1)
+
+    provider = WithReleases()
+    base = build_artist_overview(provider, artist, None, today - timedelta(days=1))
+    token = UUID(str(base["baseline_id"]))
+    first = build_artist_overview(provider, artist, base, today)
+    assert first["delta_offset"] == 1 and first["checked_day"] == base["checked_day"]
+    final = build_artist_overview(provider, artist, first, today)
+    assert calls == [(date(2026, 11, 17), today, 0), (date(2026, 11, 17), today, 1)]
+    assert len(provider.calls) == 2
+    assert final["tracks"] == base["tracks"] and final["releases"] == base["releases"]
+    patch = artist_overview_view(final, token)
+    assert patch["latest_complete"] is True and "releases" not in patch and "tracks" not in patch
+    assert final["latest"] == [MusicDiscoveryCard(
+        MusicDiscoveryEntity.RELEASE, alternate, "Album", release_id=alternate,
+        release_date="2026-11-25", release_group_id=group,
+    ).view()]
+    assert "tracks" in artist_overview_view(final, uuid4())
+
+
+def test_saved_artist_overview_is_shared_and_stale_refresh_runs_after_the_read() -> None:
+    owner = Principal(uuid4(), uuid4(), uuid4(), AccountRole.USER)
+    other = Principal(uuid4(), uuid4(), uuid4(), AccountRole.USER)
+    artist = uuid4()
+    doc = build_artist_overview(Provider(), artist, None, datetime.now(UTC).date())
+    cache = Mock(spec_set=CatalogPageCache)
+    cache.saved.return_value = (doc, datetime.now(UTC))
+    service = MusicDiscoveryService(lambda _: pytest.fail("Unexpected provider read"), cache)
+    tasks: list[Callable[[], None]] = []
+    library_artist = str(uuid4())
+    cache.library_artist_id.side_effect = lambda who, mbid: library_artist if who == owner.user_id and mbid == artist else None
+    first = service.artist_overview(owner, artist, tasks.append)
+    assert first["library_artist_id"] == library_artist
+    assert service.artist_overview(other, artist, tasks.append) == {**first, "library_artist_id": None}
+    assert not tasks and "tracks" in first and "library_recordings" not in first
+    cache.saved.return_value = (doc, datetime.now(UTC) - timedelta(days=1))
+    token = UUID(str(doc["baseline_id"]))
+    stale = service.artist_overview(other, artist, tasks.append, token)
+    assert stale["refreshing"] is True and len(tasks) == 1 and "tracks" not in stale
+    cache.update.assert_not_called()
+    cache.update.return_value = doc
+    tasks[0]()
+    assert cache.update.call_args.args[0] == f"musicbrainz:artist-overview-v1:{artist}"
+
+
+def test_artist_portrait_uses_linked_profile_and_rejects_ambiguous_links() -> None:
+    owner = Principal(uuid4(), uuid4(), uuid4(), AccountRole.USER)
+    artist = uuid4()
+    cache = Mock(spec_set=CatalogPageCache)
+    cache.read.side_effect = lambda key, load: load()
+    relations = [{"url": {"resource": "https://www.deezer.com/artist/42"}}]
+    cdn = "https://cdn-images.dzcdn.net/images/artist/" + "a"*32 + "/500x500-000000-80-0-0.jpg"
+    jpeg = bytes.fromhex("ffd8ffe0")
+    calls = []
+
+    def read(principal, url):
+        assert principal == owner
+        calls.append(url)
+        if url.startswith("https://musicbrainz.org/ws/2/artist/"):
+            return json.dumps({"id": str(artist), "relations": relations}).encode()
+        if url == "https://api.deezer.com/artist/42":
+            return json.dumps({"id": 42, "picture_big": cdn}).encode()
+        assert url == cdn
+        return jpeg
+
+    service = MusicDiscoveryService(lambda _: nullcontext(Provider()), cache, read)
+    assert service.artist_portrait(owner, artist) == jpeg and len(calls) == 3
+    relations.append({"url": {"resource": "https://www.deezer.com/artist/43"}})
+    calls.clear()
+    with pytest.raises(MusicError) as failure:
+        service.artist_portrait(owner, artist)
+    assert failure.value.code == "catalog_cover_missing" and len(calls) == 1

@@ -33,6 +33,7 @@ data class PlaybackPresentationState(
     val localTrackRefId: String? = null,
     /** Explicit dismissal survives queue/status refresh until a new user play request. */
     val miniPlayerDismissed: Boolean = false,
+    val repeatOnce: Boolean = false,
 )
 
 val PlaybackPresentationState.canSeek: Boolean

@@ -5,18 +5,21 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import subprocess
+import tempfile
 import threading
 import time
 import unicodedata
 from collections.abc import Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import closing
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
 from .download_index import DownloadIndex
 from .models import AcquiredArtifact, PlaylistItem, ProviderFailure
+from .edge_silence import trim_download_edges
 from .normalization import normalize_items
 from .orchestrator import DownloadSession, PlaylistDownloadError
 from .playlist import MAX_IMPORT_BYTES, normalize_numbered_collection, parse_playlist
@@ -175,6 +178,13 @@ class _VerifiedProvider:
                 f"sha256:{str(receipt['sha256'])[:12]}"
             ):
                 raise PlaylistDownloadError("queue_provider_artifact_mismatch")
+            path = directory / str(receipt["filename"])
+            if trim_download_edges(path, self.max_bytes):
+                source_receipt = receipt
+                receipt = audio_receipt(directory, max_bytes=self.max_bytes)
+                receipt["source_sha256"] = source_receipt["sha256"]
+                receipt["source_duration_seconds"] = source_receipt["duration_seconds"]
+                artifact = replace(artifact, artifact_ref="sha256:" + str(receipt["sha256"])[:12])
             receipt.update(
                 {
                     "schema_version": 1,
@@ -190,7 +200,33 @@ class _VerifiedProvider:
             write_json(output_directory / "receipt.json", receipt)
         except PlaylistDownloadError as error:
             raise ProviderFailure(self.name, str(error)) from error
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            raise ProviderFailure(self.name, "download_trim_failed") from error
         return artifact
+
+
+class StandaloneDownloadProvider(_VerifiedProvider):
+    """Apply the same validation and trim before publishing into the flat CLI output."""
+
+    def acquire(self, item: PlaylistItem, output_directory: Path) -> AcquiredArtifact:
+        from .providers.hitmo import _publish_exclusive
+        from .providers.jamendo import JamendoToolError, _publish_pair
+
+        make_directory(output_directory)
+        with tempfile.TemporaryDirectory(dir=output_directory, prefix=".autplay-download-") as temp:
+            stage = Path(temp)
+            result = super().acquire(item, stage)
+            receipt = read_json(stage / "receipt.json")
+            audio = stage / self.name / receipt["filename"]
+            attribution = audio.with_suffix(".jamendo.json")
+            if attribution.is_file():
+                try:
+                    _publish_pair(audio, attribution, output_directory, audio.stem)
+                except JamendoToolError as error:
+                    raise ProviderFailure(self.name, error.code) from error
+            else:
+                _publish_exclusive(audio, output_directory, audio.name)
+            return result
 
 
 def _publish(stage: Path, destination: Path, key: str) -> None:

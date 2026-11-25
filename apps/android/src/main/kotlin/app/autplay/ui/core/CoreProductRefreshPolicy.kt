@@ -11,7 +11,7 @@ public fun LibrarySection.browseSection(): LibrarySection = when (this) {
 }
 
 public fun LibraryFilter.browseFilter(): LibraryFilter = when (this) {
-    LibraryFilter.All, LibraryFilter.Loved -> this
+    LibraryFilter.All, LibraryFilter.Loved, LibraryFilter.OnDevice -> this
     else -> LibraryFilter.All
 }
 

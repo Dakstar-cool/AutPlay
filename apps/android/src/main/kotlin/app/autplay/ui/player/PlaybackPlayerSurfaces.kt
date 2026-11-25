@@ -252,6 +252,7 @@ public fun NowPlayingScreen(
     artists: List<app.autplay.application.artist.ArtistSummary> = emptyList(),
     onOpenArtist: (String) -> Unit = {},
     onAddToPlaylist: (() -> Unit)? = null,
+    requestPhoneAudio: (() -> Unit)? = null,
     serverConnection: PlayerServerConnection = PlayerServerConnection.Offline,
     onChooseArtists: (() -> Unit)? = null,
 ) {
@@ -430,6 +431,10 @@ public fun NowPlayingScreen(
                         PlayerArtistLink(state.artist, artists, openArtists)
                         PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
                         DirectControlMessage(state)
+                        if (requestPhoneAudio != null && (state.controls as? PlaybackControlGate.Locked)?.reason ==
+                            PlaybackControlLockReason.SOURCE_UNAVAILABLE) {
+                            OutlinedButton(onClick = requestPhoneAudio) { Text(stringResource(R.string.player_find_phone_audio)) }
+                        }
                     }
                 }
                 PlayerTransportControls(state, swipeTargets, onPrevious, onNext, onTogglePlayPause,
@@ -587,13 +592,13 @@ private fun PlayerSecondaryControls(
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         PlayerModeButton(
             icon = AutPlayIcon.Repeat,
-            label = stringResource(repeatLabel(state.repeatMode)),
-            stateLabel = stringResource(repeatLabel(state.repeatMode)),
+            label = stringResource(if (state.repeatOnce) R.string.player_repeat_once else repeatLabel(state.repeatMode)),
+            stateLabel = stringResource(if (state.repeatOnce) R.string.player_repeat_once else repeatLabel(state.repeatMode)),
             active = state.repeatMode != RepeatModePresentation.Off,
             enabled = state.repeatEnabled,
             onClick = onCycleRepeat,
             tag = "player-repeat",
-            one = state.repeatMode == RepeatModePresentation.One,
+            one = state.repeatOnce,
         )
         if (serverConnection != PlayerServerConnection.Offline) {
             val saved = downloadState == "COMPLETED" || state.source == PlaybackSourcePresentation.Download
@@ -855,7 +860,7 @@ private fun PrimaryTransportButton(
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun PlaybackTimeline(
+internal fun PlaybackTimeline(
     state: PlaybackPresentationState,
     onSeekBegin: (Long) -> Unit,
     onSeekUpdate: (Long) -> Unit,
@@ -1019,7 +1024,8 @@ internal fun PlayerArtistPicker(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    AutPlayArtwork(artist.name, Modifier.clearAndSetSemantics {}, size = 48.dp)
+                    val portrait = app.autplay.ui.rememberLibraryPortrait(artist.name, artist.portraitTrackIds, artist.portraitArtistIds)
+                    app.autplay.ui.ArtistAvatar(artist.name, portrait, Modifier.clearAndSetSemantics {})
                     Column {
                         Text(artist.name)
                         artist.disambiguation?.let { Text(it, style = MaterialTheme.typography.bodySmall) }

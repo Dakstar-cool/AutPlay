@@ -73,22 +73,43 @@ class ProfilePairingRuntime(
     private var pendingEnrollment: PendingEnrollment? = null
     val state: StateFlow<ProfilePairingRuntimeState> = mutableState.asStateFlow()
 
-    fun startDiscovery(rawOrigin: String) = scope.launch {
-        if (!reserveM5FirstBind()) return@launch
+    fun startDiscovery(rawOrigin: String) = scope.launch { discover(rawOrigin, connectToEnteredHost = false) }
+
+    /** The user chose this HTTPS origin in the Connect or Sign in form. */
+    suspend fun connectToServer(
+        rawOrigin: String,
+        confirmAlternate: suspend (PairingFlowSnapshot) -> Boolean = { false },
+    ): Boolean {
+        val address = rawOrigin.trim().let { if ("://" in it) it else "https://$it" }
+        return discover(address, connectToEnteredHost = true, confirmAlternate = confirmAlternate)
+    }
+
+    private suspend fun discover(
+        rawOrigin: String, connectToEnteredHost: Boolean,
+        confirmAlternate: suspend (PairingFlowSnapshot) -> Boolean = { false },
+    ): Boolean {
+        if (!reserveM5FirstBind()) return false
         val origin = runCatching { OriginNormalizer.normalize(rawOrigin, allowUnsafeDevelopmentHttp) }.getOrElse {
-            blocked(PairingFailure.SERVER_UNAVAILABLE); return@launch
+            blocked(PairingFailure.SERVER_UNAVAILABLE); return false
         }
         val pending = pendingSnapshot(origin)
         mutableState.value = ProfilePairingRuntimeState(pairing = PairingState.CheckingDiscovery(pending))
-        when (val result = port.discovery(origin)) {
-            is PairingNetworkResult.Failure -> if (isCurrentDiscovery(pending)) blocked(result.code.failure())
+        return when (val result = port.discovery(origin)) {
+            is PairingNetworkResult.Failure -> {
+                if (isCurrentDiscovery(pending)) blocked(result.code.failure())
+                false
+            }
             is PairingNetworkResult.Success -> {
                 if (!isCurrentDiscovery(pending)) {
                     result.value.identityPublicKeySpki.fill(0)
-                    return@launch
+                    return false
                 }
                 val document = result.value
-                // The signed document is evidence only. The user still explicitly confirms it.
+                if (!document.expiresAt.isAfter(Instant.now()) || 1 !in document.supportedApiMajors) {
+                    document.identityPublicKeySpki.fill(0)
+                    blocked(PairingFailure.SERVER_UNAVAILABLE)
+                    return false
+                }
                 val snapshot = PairingFlowSnapshot(
                     generationId = pending.generationId,
                     apiOrigin = document.apiOrigin,
@@ -108,7 +129,26 @@ class ProfilePairingRuntime(
                     serverLabel = document.labelHint,
                     identityPublicKeySpki = document.identityPublicKeySpki,
                 )
+                if (connectToEnteredHost) {
+                    val sameHttpsHost = origin.startsWith("https://") && document.apiOrigin == origin &&
+                        document.streamOrigin.startsWith("https://")
+                    if (sameHttpsHost || confirmAlternate(snapshot)) {
+                        if ((mutableState.value.pairing as? PairingState.AwaitingTrust)?.snapshot != snapshot) return false
+                        confirmTrust()
+                    }
+                }
+                mutableState.value.trustConfirmed
             }
+        }
+    }
+
+    /** Leaving the first-run login form releases discovery without touching any durable enrollment. */
+    fun leaveSignInDiscovery() {
+        val current = mutableState.value
+        if ((current.pairing is PairingState.AwaitingTrust || current.pairing is PairingState.Blocked) &&
+            pendingEnrollment == null && firstBindGate.isReservedBy(FirstBindCeremonyOwner.M5)) {
+            firstBindGate.release(FirstBindCeremonyOwner.M5)
+            mutableState.value = ProfilePairingRuntimeState(pairing = PairingState.Cancelled)
         }
     }
 

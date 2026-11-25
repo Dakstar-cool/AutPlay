@@ -2,6 +2,7 @@ package app.autplay.application.search
 
 import app.autplay.data.local.AutPlayDatabase
 import androidx.room3.withReadTransaction
+import app.autplay.application.library.names
 import app.autplay.application.library.decoded
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -44,11 +45,12 @@ class LocalTrackSearchRepository(
             .associateBy { it.localUserTrackRefId }
         return@withReadTransaction ordered.map { track ->
             val effective = metadata[track.localUserTrackRefId]?.decoded()
+            val names = effective.names(track.rawTitle, track.rawArtist)
             LocalTrackSearchResult(
                 localUserTrackRefId = track.localUserTrackRefId,
                 serverUserTrackRefId = track.serverUserTrackRefId,
-                rawTitle = if (effective == null) track.rawTitle else effective.text("title", track.rawTitle),
-                rawArtist = if (effective == null) track.rawArtist else effective.text("artist", track.rawArtist),
+                rawTitle = names.title,
+                rawArtist = names.artist,
             )
         }
     }

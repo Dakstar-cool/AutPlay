@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="home_release_feed_title">Новинки для вас</string>
-    <string name="home_release_feed_all">Все</string>
+    <string name="home_release_feed_all">Все новинки</string>
     <string name="home_release_in_library">В вашей медиатеке</string>
     <string name="home_release_known_artist">Ваши исполнители</string>
 </resources>

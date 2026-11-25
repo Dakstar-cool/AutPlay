@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyRow
@@ -72,6 +76,7 @@ public data class CoreProductDetailUiState(
     public val libraryRecordings: Map<String, String> = emptyMap(),
     public val recordingsIncomplete: Boolean = false,
     public val recordingsLoading: Boolean = false,
+    public val albumsLoading: Boolean = false,
     public val albumsIncomplete: Boolean = false,
     public val retryAlbums: () -> Unit = {},
     public val retryRecordings: () -> Unit = {},
@@ -81,6 +86,11 @@ public data class CoreProductDetailUiState(
     public val collectionLiked: Boolean? = null,
     public val setCollectionLiked: (Boolean) -> Unit = {},
     public val albumArtwork: Map<String, String?> = emptyMap(),
+    public val serverOverview: app.autplay.ArtistOverview? = null,
+    public val overviewLoading: Boolean = false,
+    public val moreArtistAlbums: Boolean = false,
+    public val moreArtistRecordings: Boolean = false,
+    public val expandArtistCatalog: () -> Unit = {},
 )
 
 @Composable
@@ -121,9 +131,32 @@ public fun CoreProductDetailScreen(
     var editing by rememberSaveable(state.target?.stableId) { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = editing) { editing = false }
     val playlistText = localizedPlaylistText()
+    val appearances = remember(state.artistAppearances) { state.artistAppearances.distinctBy { it.subjectType to it.displayKey } }
+    val recordings = remember(state.artistAppearances, state.publicRecordings, state.libraryRecordings,
+        state.publicCounts, state.ranking, state.artistMbid) { artistRecordings(state) }
+    val albums = remember(appearances, state.publicEditions, state.localArtistAlbums) {
+        artistAlbums(appearances, state.publicEditions, state.localArtistAlbums)
+    }
+    val guests = remember(recordings) { recordings.filter { it.guest } }
+    val personal = remember(recordings) {
+        recordings.filter { (it.local?.listenCount ?: 0) > 0 }.sortedByDescending { it.local?.listenCount }
+    }
+    var heardLimit by rememberSaveable(state.target?.stableId) { androidx.compose.runtime.mutableIntStateOf(5) }
+    val catalogVisits = remember { android.util.LruCache<CatalogArtistVisitKey, CatalogArtistVisit>(8) }
     val viewStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     viewStates.SaveableStateProvider("${state.target?.kind}:${state.target?.stableId}") {
+    val listState = rememberLazyListState()
+    if (state.target?.kind == DetailKind.Artist && state.artist != null && state.serverOverview == null && (state.moreArtistAlbums || state.moreArtistRecordings)) {
+        LaunchedEffect(listState) {
+            snapshotFlow {
+                listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 ||
+                    (listState.layoutInfo.totalItemsCount > 0 && !listState.canScrollForward)
+            }.first { it }
+            state.expandArtistCatalog()
+        }
+    }
     LazyColumn(
+        state = listState,
         modifier = Modifier.padding(
             top = contentPadding.calculateTopPadding(),
             bottom = contentPadding.calculateBottomPadding(),
@@ -140,12 +173,20 @@ public fun CoreProductDetailScreen(
             state.target?.kind == DetailKind.CatalogRelease || state.target?.kind == DetailKind.CatalogArtistTracks -> item {
                 val target = requireNotNull(state.target)
                 val release = target.kind == DetailKind.CatalogRelease
-                if (!release && !target.label.isNullOrBlank()) CatalogArtistHeader(target.label, target.stableId)
+                if (!release && !target.label.isNullOrBlank()) {
+                    val overview = state.serverOverview
+                    if (overview != null || state.overviewLoading) {
+                        ArtistHeader(target.label, artistMbid = target.stableId, releaseId = overview?.latest?.items?.firstOrNull()?.releaseId
+                            ?: overview?.releases?.items?.firstOrNull()?.releaseId)
+                    } else CatalogArtistHeader(target.label, target.stableId)
+                }
                 CollectionLike(state)
                 InternetMetadataDiscoverySection(target.stableId,
                     if (release) LibrarySearchKind.Album else LibrarySearchKind.Artist, 1,
                     onPlaylistTrack = { addTrackToPlaylistId = it },
-                    onOpenCatalog = onOpenDetail,
+                    onOpenCatalog = onOpenDetail, artistVisits = catalogVisits,
+                    onPlayHeardTrack = onPlayTrack,
+                    artistOverview = state.serverOverview, overviewLoading = state.overviewLoading,
                     initialTarget = InternetMetadataBrowseTarget(
                         if (release) InternetMetadataDiscoveryEntity.RELEASE else InternetMetadataDiscoveryEntity.ARTIST, target.stableId))
             }
@@ -319,11 +360,8 @@ public fun CoreProductDetailScreen(
             }
             state.artist != null -> {
                 val detail = state.artist
-                val appearances = state.artistAppearances.distinctBy { it.subjectType to it.displayKey }
-                val recordings = artistRecordings(state)
                 val collaborations = state.target?.kind == DetailKind.ArtistCollaborations
-                val tracks = if (collaborations) recordings.filter { it.guest } else recordings
-                val albums = artistAlbums(appearances, state.publicEditions, state.localArtistAlbums)
+                val tracks = if (collaborations) guests else recordings
                 val kind = state.target?.kind
                 val allTracks = kind == DetailKind.ArtistTracks || collaborations
                 val allAlbums = kind == DetailKind.ArtistAlbums
@@ -333,6 +371,8 @@ public fun CoreProductDetailScreen(
                     val performers = row.local?.performers.orEmpty()
                     AutPlayTrackRow(row.title ?: stringResource(R.string.detail_artist_recording), row.card?.artist ?: performers.joinToString(", ") { it.name }.ifBlank { detail.summary.name },
                         track?.localUserTrackRefId, track?.let { { onPlayTrack(it.localUserTrackRefId) } },
+                        detail = if (section != "personal" && (row.local?.listenCount ?: 0) > 0)
+                            stringResource(R.string.artist_track_heard) else null,
                         modifier = modifier.testTag("$section-track-${row.displayKey}"),
                         artistLinks = if (performers.size > 1 || row.catalogPerformers.size > 1) { {
                             FlowRow {
@@ -362,7 +402,7 @@ public fun CoreProductDetailScreen(
                 }
                 if (allTracks || allAlbums) {
                     item { DetailHeading(stringResource(when { collaborations -> R.string.catalog_guest_tracks; allTracks -> R.string.catalog_popular_tracks; else -> R.string.library_section_albums }), detail.summary.name) }
-                    if (allTracks && state.recordingsLoading && tracks.isEmpty()) {
+                    if ((allTracks && state.recordingsLoading && tracks.isEmpty()) || (allAlbums && state.albumsLoading && albums.isEmpty())) {
                         item { AutPlayStateSurface(AutPlayStateKind.Loading, stringResource(R.string.detail_loading)) }
                         return@LazyColumn
                     }
@@ -389,11 +429,21 @@ public fun CoreProductDetailScreen(
                         ?: albums.firstOrNull { it.mbid != null }
                     ArtistHeader(detail.summary.name, detail.summary.disambiguation,
                         artworkTrackId = state.albumArtwork[album?.localId] ?: first,
-                        releaseId = album?.mbid, trackCount = tracks.size)
+                        artistMbid = state.artistMbid,
+                        artistCredits = detail.summary.portraitArtistIds,
+                        artistTracks = tracks.mapNotNull { (it.local?.localTarget as? ArtistLocalTarget.Track)?.localUserTrackRefId },
+                        releaseId = album?.mbid, trackCount = tracks.size.takeUnless { state.recordingsLoading || state.recordingsIncomplete || state.moreArtistRecordings })
                     Button(onClick = { first?.let(onPlayTrack) }, enabled = first != null,
                         modifier = Modifier.testTag("collection-listen")) { Text(stringResource(R.string.detail_collection_listen)) }
                 }
                 item { CollectionLike(state) }
+                if (personal.isNotEmpty()) {
+                    item { DetailSectionHeading(stringResource(R.string.detail_artist_popular)) }
+                    items(personal.take(heardLimit), key = { "personal:${it.displayKey}" }) { trackRow(it, section = "personal") }
+                    if (personal.size > heardLimit) item {
+                        OutlinedButton(onClick = { heardLimit += 25 }) { Text(stringResource(R.string.music_catalogue_more)) }
+                    }
+                }
                 item {
                     if (state.artistMbid != null) CatalogDownloadAction("artist", state.artistMbid)
                     else {
@@ -406,19 +456,16 @@ public fun CoreProductDetailScreen(
                     }
                 }
                 val today = java.time.LocalDate.now().toString()
-                albums.firstOrNull { it.date != null && it.date <= today }?.let { latest ->
+                albums.firstOrNull { it.date != null && it.date <= today }?.takeUnless {
+                    (state.moreArtistAlbums && state.serverOverview?.latestComplete != true) || state.albumsLoading || state.albumsIncomplete
+                }?.let { latest ->
                     item { DetailSectionHeading(stringResource(R.string.catalog_latest_release)) }
                     item { albumTile(latest, Modifier.width(180.dp), "latest") }
                 }
-                val personal = tracks.filter { (it.local?.listenCount ?: 0) > 0 }.sortedByDescending { it.local?.listenCount }.take(5)
-                if (personal.isNotEmpty()) {
-                    item { DetailSectionHeading(stringResource(R.string.detail_artist_popular)) }
-                    items(personal, key = { "personal:${it.displayKey}" }) { trackRow(it, section = "personal") }
-                }
-                if (state.recordingsLoading) {
+                if (state.recordingsLoading && tracks.isEmpty()) {
                     item { AutPlayStateSurface(AutPlayStateKind.Loading, stringResource(R.string.detail_loading)) }
                 }
-                if (tracks.isNotEmpty() || state.recordingsIncomplete) {
+                if (tracks.isNotEmpty() || state.recordingsIncomplete || state.moreArtistRecordings) {
                     item { CollectionListHeading(stringResource(R.string.catalog_popular_tracks)) { openList(DetailKind.ArtistTracks) } }
                     item {
                         LazyRow(modifier = Modifier.testTag("artist-track-preview"), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -430,12 +477,11 @@ public fun CoreProductDetailScreen(
                         }
                     }
                 }
-                val guests = tracks.filter { it.guest }
-                if (guests.isNotEmpty()) {
+                if (guests.isNotEmpty() || (state.moreArtistRecordings && !state.recordingsLoading)) {
                     item { CollectionListHeading(stringResource(R.string.catalog_guest_tracks)) { openList(DetailKind.ArtistCollaborations) } }
                     items(guests.take(3), key = { "guest:${it.displayKey}" }) { trackRow(it, section = "guest") }
                 }
-                if (albums.isNotEmpty() || state.albumsIncomplete) {
+                if (albums.isNotEmpty() || state.albumsIncomplete || state.moreArtistAlbums) {
                     item { CollectionListHeading(stringResource(R.string.library_section_albums)) { openList(DetailKind.ArtistAlbums) } }
                     item {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

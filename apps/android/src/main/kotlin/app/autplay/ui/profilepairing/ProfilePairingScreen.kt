@@ -280,11 +280,12 @@ internal fun ProfilePairingScreen(
                 }
                 is PairingState.CheckingDiscovery -> PairingProgress(R.string.profile_connection_checking, actions.cancelPairing)
                 is PairingState.AwaitingTrust -> {
-                    Text(stringResource(R.string.profile_connection_trust), style = MaterialTheme.typography.titleMedium)
-                    Text(stringResource(R.string.profile_trust_explanation))
+                    Text(if (state.trustConfirmed) pairing.snapshot.apiOrigin else stringResource(R.string.profile_connection_trust),
+                        style = MaterialTheme.typography.titleMedium)
+                    if (!state.trustConfirmed) Text(stringResource(R.string.profile_trust_explanation))
                     state.serverLabel?.let { Text(stringResource(R.string.profile_server_named, it)) }
-                    TrustEvidence(pairing.snapshot)
-                    Button(onClick = actions.confirmTrust) { Text(stringResource(R.string.profile_trust_server)) }
+                    if (!state.trustConfirmed) TrustEvidence(pairing.snapshot)
+                    if (!state.trustConfirmed) Button(onClick = actions.confirmTrust) { Text(stringResource(R.string.profile_trust_server)) }
                     OutlinedButton(onClick = { invitation = ""; actions.cancelPairing() }) { Text(stringResource(R.string.profile_cancel)) }
                 }
                 is PairingState.AwaitingConfirmation -> {

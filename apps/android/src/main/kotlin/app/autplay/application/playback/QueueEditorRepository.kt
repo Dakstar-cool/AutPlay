@@ -5,6 +5,8 @@ import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.QueueEntryEntity
 import app.autplay.data.local.entity.QueueSnapshotEntity
 import app.autplay.domain.LocalId
+import app.autplay.application.library.decoded
+import app.autplay.application.library.names
 import app.autplay.application.sync.P07PayloadCodec
 import app.autplay.playback.PlaybackCommand
 import app.autplay.playback.PlaybackSessionOwner
@@ -23,7 +25,8 @@ class QueueEditorRepository(
     fun observeActive(expectedProfileId: String?, limit: Int = MAX_QUEUE_ENTRIES): Flow<OrdinaryQueueProjection?> = combine(
         database.queueDao().activeSnapshot(),
         database.queueDao().activeEntries(limit),
-    ) { snapshot, entries -> snapshot to entries }.map { (snapshot, entries) ->
+        database.trackMetadataDao().changes(expectedProfileId ?: LEGACY_UNSCOPED_PROFILE),
+    ) { snapshot, entries, _ -> snapshot to entries }.map { (snapshot, entries) ->
         snapshot?.takeIf { it.serverProfileId == expectedProfileId }?.let {
             projection(it, entries.filter { entry -> entry.queueSnapshotId == it.queueSnapshotId })
         }
@@ -146,12 +149,20 @@ class QueueEditorRepository(
 
     private suspend fun projection(snapshot: QueueSnapshotEntity, entries: List<QueueEntryEntity>): OrdinaryQueueProjection {
         val currentIndex = entries.indexOfFirst { it.queueEntryId == snapshot.currentEntryId }
+        val profile = snapshot.serverProfileId ?: LEGACY_UNSCOPED_PROFILE
+        val chunks = entries.map { it.localUserTrackRefId }.distinct().chunked(500)
+        val tracks = chunks.flatMap { database.libraryDao().trackRefs(it, it.size) }
+            .filter { it.serverProfileId == profile }.associateBy { it.localUserTrackRefId }
+        val metadata = chunks.flatMap { database.trackMetadataDao().forTracks(profile, it) }
+            .associateBy { it.localUserTrackRefId }
         return OrdinaryQueueProjection(
             snapshotId = LocalId(snapshot.queueSnapshotId), queueType = snapshot.queueType,
             currentEntryId = snapshot.currentEntryId?.let(::LocalId),
             entries = entries.mapIndexed { index, entry ->
-                val track = database.libraryDao().trackRef(entry.localUserTrackRefId)
-                OrdinaryQueueEntry(LocalId(entry.queueEntryId), LocalId(entry.localUserTrackRefId), track?.rawTitle, track?.rawArtist, index == currentIndex, index > currentIndex)
+                val track = tracks[entry.localUserTrackRefId]
+                val names = metadata[entry.localUserTrackRefId]?.decoded().names(track?.rawTitle, track?.rawArtist)
+                OrdinaryQueueEntry(LocalId(entry.queueEntryId), LocalId(entry.localUserTrackRefId),
+                    names.title, names.artist, index == currentIndex, index > currentIndex)
             },
             canPrevious = currentIndex > 0,
             canNext = currentIndex >= 0 && currentIndex + 1 < entries.size,

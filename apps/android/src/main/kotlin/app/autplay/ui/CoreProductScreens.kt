@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
@@ -65,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import app.autplay.R
 import app.autplay.application.search.LibrarySearchKind
 import app.autplay.playback.presentation.PlaybackPresentationState
+import app.autplay.ui.player.PlaybackTimeline
 import app.autplay.ui.core.LibraryFilter
 import app.autplay.ui.core.LibrarySection
 import app.autplay.ui.core.LibrarySort
@@ -101,7 +103,23 @@ public data class CoreArtistUiItem(
     public val id: String,
     public val name: String,
     public val subtitle: String?,
+    public val portraitTrackIds: List<String> = emptyList(),
+    public val portraitArtistIds: List<String> = emptyList(),
 )
+
+@Composable
+private fun ArtistCard(artist: CoreArtistUiItem, onClick: () -> Unit) {
+    AutPlayCard(onClick = onClick) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val image = rememberLibraryPortrait(artist.name, artist.portraitTrackIds, artist.portraitArtistIds)
+            ArtistAvatar(artist.name, image)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(artist.name, style = MaterialTheme.typography.titleMedium)
+                artist.subtitle?.let { Text(it, color = AutPlayTokens.colors.mutedText) }
+            }
+        }
+    }
+}
 
 public enum class ArtistBrowseUiState {
     Unavailable,
@@ -255,6 +273,10 @@ public fun HomeProductScreen(
     onOpenRelease: (String) -> Unit = {},
     onAddLocal: () -> Unit = {},
     importingLocalTrack: Boolean = false,
+    onSeekBegin: (Long) -> Unit = {},
+    onSeekUpdate: (Long) -> Unit = {},
+    onSeekCommit: () -> Unit = {},
+    onTimelineObserving: (Boolean) -> Unit = {},
     onContinueListening: () -> Unit = {
         (state.continueListening?.trackId ?: state.recentlyPlayed.firstOrNull()?.id)?.let(onPlayTrack)
     },
@@ -339,7 +361,18 @@ public fun HomeProductScreen(
             }
         }
         item(key = "home:contexts:${state.wheelOwner}") {
-            HomeWaveWheel(state.wheelOrder, state.wheelMixes, myWaveAllowed, playerState.isPlaying, onPlayWheelMix)
+            Column {
+                if (playerState.mediaId != null) {
+                    DisposableEffect(onTimelineObserving) {
+                        onTimelineObserving(true)
+                        onDispose { onTimelineObserving(false) }
+                    }
+                    Column(Modifier.fillMaxWidth().testTag("home-wheel-timeline")) {
+                        PlaybackTimeline(playerState, onSeekBegin, onSeekUpdate, onSeekCommit)
+                    }
+                }
+                HomeWaveWheel(state.wheelOrder, state.wheelMixes, myWaveAllowed, playerState.isPlaying, onPlayWheelMix)
+            }
         }
         if (state.offlineFallback) {
             item {
@@ -356,17 +389,9 @@ public fun HomeProductScreen(
         }
         val recentItems = state.recentlyPlayed.ifEmpty { state.recentlyAdded }
         if (recentItems.isNotEmpty()) {
-            item(key = "home:recent-heading") {
-                AutPlaySectionHeader(stringResource(
-                    if (state.recentlyPlayed.isNotEmpty()) R.string.home_recently_played else R.string.home_recently_added,
-                ))
-            }
             items(recentItems, key = { "home-recent:${it.id}" }) { track ->
                 AutPlayTrackRow(track.title, track.artist, track.id, { onPlayTrack(track.id) }, Modifier.testTag("home-recent"))
             }
-        }
-        if (state.recommendations.isNotEmpty() || state.recommendationLoading || state.recommendationError) {
-            item(key = "home:recommendations-heading") { AutPlaySectionHeader(stringResource(R.string.home_recommendations)) }
         }
         if (state.recommendationError) {
             item {
@@ -387,7 +412,6 @@ public fun HomeProductScreen(
                 title = item.title,
                 artist = item.artist,
                 trackId = item.artworkTrackId,
-                detail = item.section.takeUnless { it == stringResource(R.string.home_recommendations) },
                 onPlay = { onPlayRecommendation(item.id) },
                 playEnabled = item.feedbackEnabled && recommendationPlaybackAllowed,
                 modifier = Modifier.testTag("home-recommendation")
@@ -398,7 +422,6 @@ public fun HomeProductScreen(
             }
         }
         if (state.playlists.isNotEmpty()) {
-            item(key = "home:playlists-heading") { AutPlaySectionHeader(stringResource(R.string.home_playlists)) }
             items(state.playlists, key = { "home-playlist:${it.id}" }) { playlist ->
                 AutPlayCard(onClick = { onOpenPlaylist(playlist.id) }) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -409,7 +432,6 @@ public fun HomeProductScreen(
             }
         }
         if (state.offlineReady.isNotEmpty()) {
-            item(key = "home:offline-heading") { AutPlaySectionHeader(stringResource(R.string.home_offline_ready)) }
             items(state.offlineReady, key = { "home-offline:${it.id}" }) { track ->
                 AutPlayTrackRow(track.title, track.artist, track.id, { onPlayTrack(track.id) })
             }
@@ -420,9 +442,6 @@ public fun HomeProductScreen(
             }
         }
         if (state.problems.isNotEmpty()) {
-            item(key = "home:problems-heading") {
-                AutPlaySectionHeader(stringResource(R.string.home_problems))
-            }
             items(state.problems, key = { "home-problem:${it.id}" }) { problem ->
                 AutPlayStateSurface(
                     AutPlayStateKind.Offline,
@@ -512,7 +531,7 @@ public fun SearchProductScreen(
         if (state.kind == LibrarySearchKind.Artist) {
             if (state.query.isNotBlank() && (state.searched || state.vaultSearched)) {
                 items(state.artistMatches, key = { "artist:${it.id}" }) { artist ->
-                    AutPlayCard(onClick = { onOpenArtist(artist.id) }) { Text(artist.name) }
+                    ArtistCard(artist) { onOpenArtist(artist.id) }
                 }
                 if (state.artistMatches.isEmpty()) item { Text(stringResource(R.string.search_empty)) }
                 if (state.vaultAvailable) item {
@@ -733,7 +752,11 @@ public fun LibraryProductScreen(
                         fullWidthItem(key = "library:tracks-empty") {
                             AutPlayStateSurface(
                                 AutPlayStateKind.Empty,
-                                stringResource(if (displayState.filter == LibraryFilter.Loved) R.string.library_favorites_empty else R.string.library_empty_body),
+                                stringResource(when (displayState.filter) {
+                                    LibraryFilter.Loved -> R.string.library_favorites_empty
+                                    LibraryFilter.OnDevice -> R.string.library_on_device_empty
+                                    else -> R.string.library_empty_body
+                                }),
                             )
                         }
                     }
@@ -775,16 +798,7 @@ public fun LibraryProductScreen(
                             }
                         }
                         gridItems(state.artists, key = { "$LIBRARY_ARTIST_PREFIX${it.id}" }) { artist ->
-                            AutPlayCard(
-                                onClick = { onOpenCollection(LibrarySection.Artists, artist.id) },
-                            ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(artist.name, style = MaterialTheme.typography.titleMedium)
-                                    artist.subtitle?.let {
-                                        Text(it, color = AutPlayTokens.colors.mutedText)
-                                    }
-                                }
-                            }
+                            ArtistCard(artist) { onOpenCollection(LibrarySection.Artists, artist.id) }
                         }
                     }
                 }
@@ -833,7 +847,7 @@ private fun PersonalLibraryMatches(query: String, state: LibraryScreenUiState, p
         }
         if (artists.isNotEmpty()) {
             items(artists, key = { "artist:${it.id}" }) { artist ->
-                AutPlayCard(onClick = { open(LibrarySection.Artists, artist.id) }) { Text(artist.name) }
+                ArtistCard(artist) { open(LibrarySection.Artists, artist.id) }
             }
         }
         for ((section, rows) in listOf(LibrarySection.Albums to albums, LibrarySection.Playlists to playlists)) {

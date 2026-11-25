@@ -39,12 +39,13 @@ internal fun buildLibraryTrackSummaries(
             addedAtMs = entry.addedAtMs,
             sourceOrder = index,
             loved = entry.loved,
+            onDevice = entry.onDevice,
             canRemove = entry.localLibraryEntryId != null || entry.loved,
             downloaded = downloaded,
             availability = resolveTrackAvailability(
                 entry.availabilityStatus,
                 audio,
-                downloaded,
+                downloaded || entry.onDevice,
                 serverConnected && entry.serverPlaybackCandidate,
             ),
         )
@@ -54,10 +55,10 @@ internal fun buildLibraryTrackSummaries(
 private fun resolveTrackAvailability(
     libraryAvailability: String,
     audioStates: List<CoreLocalAudioSummary>,
-    downloaded: Boolean,
+    hasLocalSource: Boolean,
     serverPlaybackCandidate: Boolean,
 ): TrackAvailability = when {
-    downloaded || serverPlaybackCandidate || libraryAvailability == "LOCAL" ||
+    hasLocalSource || serverPlaybackCandidate || libraryAvailability == "LOCAL" ||
         audioStates.any { it.status == "AVAILABLE" && it.hasReadAccess } -> TrackAvailability.Available
     audioStates.any { it.status == "PERMISSION_REVOKED" || !it.hasReadAccess } ->
         TrackAvailability.PermissionRevoked
@@ -171,6 +172,8 @@ internal fun buildLibraryScreenUiState(
             CoreArtistUiItem(
                 id = artist.key.artistId.value,
                 name = artist.name,
+                portraitTrackIds = artist.portraitTrackIds,
+                portraitArtistIds = artist.portraitArtistIds,
                 subtitle = listOfNotNull(artist.disambiguation, artist.countryCode)
                     .filter(String::isNotBlank).joinToString(" · ").ifBlank { null },
             )
