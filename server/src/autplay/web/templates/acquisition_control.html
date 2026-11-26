@@ -107,5 +107,35 @@
       </form>
     </section>
   {% elif search_mode %}<p class="notice" role="status">{{ t("acquisition_no_matches") }}</p>{% endif %}
+  {% if preservation is defined and preservation is not none %}
+  <section id="preservation">
+    <h2>Music Preservation Watcher</h2>
+    <form method="post" action="/admin/acquisition/preservation/scan">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="operation_id" value="{{ scan_operation_id }}">
+      <button type="submit">{{ t("mpw_scan") }}</button>
+    </form>
+    {% for run in preservation %}
+    <details {% if loop.first %}open{% endif %}>
+      <summary>{{ run.requested_at }} · {{ t("mpw_finished" if run.finished_at else "mpw_waiting") }}</summary>
+      {% if run.finished_at %}
+      <p>{{ t("mpw_sources") }} {{ run.sources|length }}
+      {% for key in ["new","queued","pending","downloaded","present","unavailable","review","error"] %}
+        · {{ t("mpw_" ~ key) }} {{ run.counts.get(key, 0) }}
+      {% endfor %}</p>
+      {% for name, result in run.sources.items() %}{% if result != "ok" %}<p>{{ name }} · {{ result }}</p>{% endif %}{% endfor %}
+      <ul>{% for case, outcome, error in run.details %}
+        <li><a href="{{ case.url }}" rel="noreferrer">{{ case.artist }} {{ case.title }}</a>
+        · {{ case.version }} · {{ case.scope }} · {{ case.date }} · {{ case.reason }}
+        · {{ t("mpw_first_seen") }} {{ case.first_seen }}
+        {% if case.listing is defined %} · <a href="{{ case.listing_url }}">{{ t("mpw_" ~ case.listing) }}</a>{% endif %}
+        {% if case.observed is defined and not case.observed %} · {{ t("mpw_previous") }}{% endif %}
+        · {{ t("mpw_" ~ case.confidence) }} · {{ t("mpw_" ~ outcome) }}{% if error %} · {{ error }}{% endif %}</li>
+      {% endfor %}</ul>
+      {% endif %}
+    </details>
+    {% else %}<p>{{ t("mpw_empty") }}</p>{% endfor %}
+  </section>
+  {% endif %}
 </div>
 {% endblock %}

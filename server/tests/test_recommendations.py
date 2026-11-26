@@ -143,6 +143,41 @@ def _snapshot(tracks: tuple[SnapshotTrack, ...]) -> RecommendationInputSnapshot:
     )
 
 
+@pytest.mark.parametrize("weights", [(1.0,), (0.65, 0.35), (0.65, 0.2275, 0.1225)])
+def test_like_credits_rank_solo_artists_in_billing_order(weights: tuple[float, ...]) -> None:
+    acts = tuple(f"artist-{i}" for i in range(len(weights)))
+    liked = replace(_track(uuid4(), artist="liked-credit", preference="LIKED"), artist_acts=acts)
+    solos = tuple(replace(_track(uuid4(), artist=k), artist_acts=(k,)) for k in acts)
+    ignored = replace(
+        solos[-1],
+        recording_id=uuid4(),
+        artist_key="other-credit",
+        preference="LIKED",
+        excluded=True,
+    )
+    snapshot = _snapshot((liked, ignored, *reversed(solos)))
+    query = replace(_query(uuid4()), exploration=0)
+    runner = RecommendationPipelineRunner()
+    ranked = runner.run(query, snapshot, baseline_pipeline_definition("3"))
+    assert [r.recording_id for r in ranked] == [
+        liked.recording_id,
+        *(s.recording_id for s in solos),
+    ]
+    weighted = [
+        next(c for c in item.contributions if c.source_key == "artist_release_metadata")
+        for item in ranked[1:]
+    ]
+    assert [c.provenance["artist_like_weight"] for c in weighted] == pytest.approx(weights)
+    assert all(c.source_version == "2" for c in weighted)
+    legacy = runner.run(query, snapshot, baseline_pipeline_definition("2"))
+    assert not any(
+        c.source_key == "freshness"
+        for item in legacy
+        if item.recording_id != liked.recording_id
+        for c in item.contributions
+    )
+
+
 def _query(user_id: UUID, *, limit: int = 10, seed: int = 42) -> RecommendationQuery:
     return RecommendationQuery(
         user_id,

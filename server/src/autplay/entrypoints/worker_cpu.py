@@ -55,6 +55,7 @@ from autplay.application.discovery_automation import (
     DiscoveryAutomationService,
     DiscoveryScanHandler,
 )
+from autplay.application.external_collections import ExternalCollections
 from autplay.application.imports import ImportJobHandler
 from autplay.application.job_worker import (
     JobHandler,
@@ -70,6 +71,7 @@ from autplay.application.profile_pairing import (
 from autplay.application.public_access import cleanup_expired_public_access
 from autplay.application.social import SocialService
 from autplay.application.vault_ingest import VaultIngestHandler
+from autplay.application.vault_name_jobs import NORMALIZE_NAMES, VaultNameJobs
 from autplay.domain.jobs import JobKey, RetryPolicy
 from autplay.domain.privacy_deletion import DeletionEvidenceError
 from autplay.domain.resource_admission import ResourceAdmissionError
@@ -394,6 +396,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             )
             ingest_handler = ingest_runtime.handler
         handlers: dict[JobKey, JobHandler] = dict(vault_ingest_handlers(ingest_handler))
+        handlers[NORMALIZE_NAMES] = VaultNameJobs(sessions).run
         handlers.update(import_handlers(ImportJobHandler(sessions)))
         handlers.update(standard_analysis_handlers(StandardAnalysisHandler(sessions)))
         if discovery is not None:
@@ -487,6 +490,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                         now=datetime.now(UTC), limit=10_000
                     )
                     + social_cleanup()
+                    + ExternalCollections(sessions).cleanup_expired()
                 )
 
             def capture_cleanup() -> int:

@@ -56,6 +56,59 @@ class AndroidPlaybackSourceResolverTest {
         assertEquals(SelectedAudioSource.LOCAL_URI, result.value.source)
     }
 
+    @Test fun metadataRowPlaysTheImportedFileOnlyForTheSameProfileAndRecording() = runBlocking {
+        val imported = track(31)
+        val libraryRow = track(32).copy(serverRecordingId = imported.serverRecordingId)
+        val dao = database.libraryDao()
+        dao.upsertTrackRef(imported)
+        dao.upsertTrackRef(libraryRow)
+        database.localAudioDao().upsertState(audio(imported, "content://$testPackageName.readable/audio/1"))
+        val resolver = AndroidPlaybackSourceResolver(context, database, applicationNonSecretSettingsStore(context))
+        val id = LocalId(libraryRow.localUserTrackRefId)
+        val local = resolver.resolve(id, 10) as AndroidSourceResolution.Available
+        assertEquals(id, local.value.trackRefId)
+        assertEquals(SelectedAudioSource.LOCAL_URI, local.value.source)
+        dao.upsertTrackRef(libraryRow.copy(serverProfileId = uuid(7)))
+        assertEquals(emptyList<LocalAudioStateEntity>(), database.localAudioDao().otherAudioForRecording(id.value, 32))
+    }
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+    @Test fun metadataOnlyLibraryRowFindsAndDecodesThePhoneFile() = runBlocking {
+        val settings = applicationNonSecretSettingsStore(context)
+        settings.update(NonSecretSettings())
+        val files = context.contentResolver
+        val media = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        val title = UUID.randomUUID().toString().take("Metadata fixture".length)
+        val values = android.content.ContentValues().apply {
+            put("_display_name", "autplay-$title.mp3")
+            put("mime_type", "audio/mpeg")
+            put("relative_path", "Music/")
+            put("is_pending", 1)
+        }
+        val source = requireNotNull(files.insert(media, values))
+        try {
+            val bytes = InstrumentationRegistry.getInstrumentation().context.assets.open("metadata/metadata-fixture.mp3").use { it.readBytes() }
+            val titleOffset = bytes.toString(Charsets.ISO_8859_1).indexOf("Metadata fixture")
+            require(titleOffset >= 0)
+            title.toByteArray().copyInto(bytes, titleOffset)
+            files.openOutputStream(source)!!.use { it.write(bytes) }
+            files.update(source, android.content.ContentValues().apply { put("is_pending", 0) }, null, null)
+            val track = track(45).copy(rawTitle = title, rawArtist = "AutPlay verification", rawDurationMs = 3000)
+            database.libraryDao().upsertTrackRef(track)
+            val resolver = AndroidPlaybackSourceResolver(context, database, settings)
+            val result = resolver.resolve(LocalId(track.localUserTrackRefId), 10) as AndroidSourceResolution.Available
+            assertEquals(SelectedAudioSource.LOCAL_URI, result.value.source)
+            val player = android.media.MediaPlayer()
+            try {
+                player.setDataSource(context, result.value.runtimeUri)
+                player.prepare()
+                player.start()
+                withTimeout(5000) { while (player.currentPosition < 150) delay(40) }
+            } finally { player.release() }
+        } finally { files.delete(source, null, null) }
+        Unit
+    }
+
     @Test fun slowProviderKeepsMainResponsiveAndReceivesCancellationWithoutPersistingMissing() = runBlocking {
         val uri = android.net.Uri.parse("content://$testPackageName.slow/audio/1")
         context.contentResolver.call(uri, "reset", null, null)

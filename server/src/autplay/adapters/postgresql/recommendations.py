@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from hashlib import sha256
@@ -23,6 +24,7 @@ from autplay.application.recommendations import (
     recommendation_policy_snapshot_document,
     recommendation_snapshot_limit,
 )
+from autplay.domain.artist_affinity import snapshot_artist_acts
 from autplay.domain.recommendations import (
     CandidateContribution,
     ComponentVersionRef,
@@ -38,6 +40,7 @@ from autplay.domain.recommendations import (
     SnapshotTrack,
 )
 
+from .artist_onboarding import starter_evidence
 from .models import (
     OfflineRecommendationPackRow,
     RecommendationInputSnapshotRow,
@@ -45,6 +48,7 @@ from .models import (
     RecommendationPipelineVersionRow,
     RecommendationRequestRow,
 )
+from .recommendation_credits import credit_acts
 from .sona_native_capture import SqlAlchemySonaNativeCapture
 
 _MAX_SNAPSHOT_TRACKS = RECOMMENDATION_MAX_SNAPSHOT_TRACKS
@@ -86,10 +90,34 @@ class SqlAlchemyRecommendationRuntime:
             {"user_id": user_id, "limit": _SNAPSHOT_CLEANUP_BATCH},
         )
         rows = session.execute(
-            text(_SNAPSHOT_SQL_V2 if self._snapshot_policy_version == "2" else _SNAPSHOT_SQL),
+            text(_SNAPSHOT_SQL if self._snapshot_policy_version == "1" else _SNAPSHOT_SQL_V2),
             {"user_id": user_id, "limit": self._snapshot_limit},
         ).mappings()
         tracks = tuple(_track_from_mapping(row) for row in rows)
+        # Historical V1 captures can run before the artist onboarding schema exists.
+        weights, published = (
+            starter_evidence(session, user_id) if self._snapshot_policy_version != "1" else ({}, ())
+        )
+        if weights:
+            by_id = {track.recording_id: track for track in tracks}
+            for public in published:
+                track = _track_from_mapping(public)
+                by_id.setdefault(track.recording_id, track)
+            prioritized = sorted(
+                by_id.values(),
+                key=lambda track: (
+                    -weights.get(track.artist_key, 0),
+                    -track.added_at_ms,
+                    track.recording_id,
+                ),
+            )[: self._snapshot_limit]
+            tracks = tuple(
+                replace(track, starter_artist_weight=weights.get(track.artist_key, 0))
+                for track in sorted(prioritized, key=lambda track: track.recording_id)
+            )
+        if self._snapshot_policy_version == "3":
+            acts = credit_acts(session, {track.artist_key for track in tracks})
+            tracks = tuple(replace(t, artist_acts=acts.get(t.artist_key, ())) for t in tracks)
         watermark = int(
             session.scalar(
                 text(
@@ -577,7 +605,9 @@ def _track_from_mapping(value: RowMapping) -> SnapshotTrack:
         availability=str(value["availability"]),
         authorized=bool(value["authorized"]),
         identity_status=str(value["identity_status"]),
-        preference=str(value["preference"]),
+        preference="NEUTRAL"
+        if value["excluded"] and value["preference"] == "LIKED"
+        else str(value["preference"]),
         excluded=bool(value["excluded"]),
         play_count=cast(int, value["play_count"]),
         organic_play_count=cast(int, value["organic_play_count"]),
@@ -621,6 +651,8 @@ def _track_from_document(value: Mapping[str, JsonValue]) -> SnapshotTrack:
         _optional_integer(value, "release_date_ordinal"),
         _optional_uuid(value, "owner_identity_decision_id"),
         _optional_uuid(value, "verified_audio_variant_id"),
+        _integer(value, "starter_artist_weight") if "starter_artist_weight" in value else 0,
+        snapshot_artist_acts(value.get("artist_acts", [])),
     )
 
 

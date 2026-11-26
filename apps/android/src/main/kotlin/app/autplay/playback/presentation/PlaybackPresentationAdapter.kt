@@ -1,5 +1,10 @@
 package app.autplay.playback.presentation
 
+import app.autplay.playback.PlaybackCommand
+import app.autplay.domain.LocalId
+import app.autplay.application.artist.musicDisplayCredit
+import app.autplay.application.artist.musicDisplayTitle
+
 import android.content.ComponentName
 import android.content.Context
 import androidx.core.content.ContextCompat
@@ -25,6 +30,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -48,6 +55,7 @@ class PlaybackPresentationAdapter(
     private val _state = MutableStateFlow(PlaybackPresentationState(miniPlayerDismissed = initialMiniPlayerDismissed))
     val state: StateFlow<PlaybackPresentationState> = _state.asStateFlow()
 
+    private val owner = app.autplay.playback.ServicePlaybackSessionOwner(appContext)
     private var controller: MediaController? = null
     private var foreground = false
     private var connecting = false
@@ -72,6 +80,10 @@ class PlaybackPresentationAdapter(
             publishFromController()
         }
         lifecycle.addObserver(this)
+        scope.launch {
+            app.autplay.playback.PlaybackRuntimeState.state.map { it.queueEntryId to it.repeatMode }
+                .distinctUntilChanged().collect { publishFromController() }
+        }
         scope.launch {
             queueContextRepository.context.collect {
                 publishFromController()
@@ -116,7 +128,7 @@ class PlaybackPresentationAdapter(
         val commit = result.commit ?: run { publishFromController(); return }
         val current = controller ?: run { publishFromController(); return }
         PlaybackCommandBoundary.commitSeek(
-            port = MediaControllerCommandPort(current),
+            port = commandPort(current),
             context = queueContextRepository.context.value,
             commit = commit,
             seekable = current.isCurrentMediaItemSeekable && !current.isCurrentMediaItemLive,
@@ -139,7 +151,7 @@ class PlaybackPresentationAdapter(
     fun togglePlayPause() {
         val current = controller ?: return
         PlaybackCommandBoundary.togglePlayPause(
-            MediaControllerCommandPort(current),
+            commandPort(current),
             queueContextRepository.context.value,
         )
         publishFromController()
@@ -149,7 +161,7 @@ class PlaybackPresentationAdapter(
     fun dismissMiniPlayer() {
         val current = controller ?: return
         if (PlaybackCommandBoundary.pauseForDismissal(
-                MediaControllerCommandPort(current), queueContextRepository.context.value,
+                commandPort(current), queueContextRepository.context.value,
             )) {
             setMiniPlayerDismissed(true)
             publishFromController()
@@ -167,16 +179,20 @@ class PlaybackPresentationAdapter(
     fun toggleShuffle() {
         val current = controller ?: return
         PlaybackCommandBoundary.toggleShuffle(
-            MediaControllerCommandPort(current),
+            commandPort(current),
             queueContextRepository.context.value,
         )
         publishFromController()
     }
 
+    private fun commandPort(current: MediaController) = MediaControllerCommandPort(current) { entry ->
+        scope.launch { owner.dispatch(PlaybackCommand.CycleTrackRepeat(LocalId(entry))) }
+    }
+
     fun cycleRepeatMode() {
         val current = controller ?: return
         PlaybackCommandBoundary.cycleRepeatMode(
-            MediaControllerCommandPort(current),
+            commandPort(current),
             queueContextRepository.context.value,
         )
         publishFromController()
@@ -224,8 +240,8 @@ class PlaybackPresentationAdapter(
         val next = PlaybackPresentationState(
             miniPlayerDismissed = _state.value.miniPlayerDismissed,
             mediaId = mediaId,
-            title = current?.mediaMetadata?.title?.toString(),
-            artist = current?.mediaMetadata?.artist?.toString(),
+            title = current?.mediaMetadata?.title?.toString()?.let(::musicDisplayTitle),
+            artist = current?.mediaMetadata?.artist?.toString()?.let(::musicDisplayCredit),
             localTrackRefId = current?.mediaMetadata?.extras?.getString("local_user_track_ref_id"),
             positionMs = current?.currentPosition?.coerceAtLeast(0) ?: 0,
             bufferedPositionMs = current?.bufferedPosition?.coerceAtLeast(0) ?: 0,
@@ -266,6 +282,7 @@ class PlaybackPresentationAdapter(
                 gateFor(it, context, Player.COMMAND_SET_REPEAT_MODE) is PlaybackControlGate.Allowed
             } == true,
             shuffleModeEnabled = current?.shuffleModeEnabled == true,
+            repeatOnce = app.autplay.playback.PlaybackRuntimeState.state.value.let { it.queueEntryId == mediaId && it.repeatMode == "ONCE" },
             repeatMode = when (current?.repeatMode) {
                 Player.REPEAT_MODE_ONE -> RepeatModePresentation.One
                 Player.REPEAT_MODE_ALL -> RepeatModePresentation.All

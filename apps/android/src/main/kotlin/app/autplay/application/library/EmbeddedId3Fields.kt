@@ -26,9 +26,14 @@ internal fun embeddedId3Fields(context: Context, uri: Uri): JsonObject = try {
         val frames = (0 until decoded.length()).mapNotNull { decoded[it] as? TextInformationFrame }
         val fields = linkedMapOf<String, JsonElement>()
         frames.sortedBy { if (it.id in setOf("TYER", "TYE", "TORY")) 0 else 1 }.forEach { frame ->
-            val value = frame.values.firstOrNull()?.trim()?.takeIf { it.length in 1..500 && it.none { c -> c.code < 32 } } ?: return@forEach
+            val text = when (frame.id) {
+                "TPE1", "TP1", "TCOM", "TCM" -> frame.values.joinToString("; ") { it.trim() }
+                else -> frame.values.firstOrNull()?.trim()
+            }
+            val value = text?.takeIf { it.length in 1..500 && it.none { c -> c.code < 32 } } ?: return@forEach
             val key = when (frame.id) {
                 "TIT2", "TT2" -> "title"; "TPE1", "TP1" -> "artist"; "TALB", "TAL" -> "album"
+                "TCOM", "TCM" -> "composer"
                 "TPE2", "TP2" -> "album_artist"; "TPUB", "TPB" -> "label"
                 "TDRC", "TDRL", "TYER", "TYE" -> "release_date"; "TDOR", "TORY" -> "original_release_date"
                 "TRCK", "TRK" -> "track_number"; "TPOS", "TPA" -> "disc_number"

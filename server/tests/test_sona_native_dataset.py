@@ -64,6 +64,7 @@ def capture(
             recording_id=recording,
             user_track_ref_id=UUID(int=110) if policy_version == "2" else None,
             artist_key="artist",
+            artist_acts=("lead", "guest") if policy_version == "3" else (),
             release_key=None,
             metadata_tokens=("rock",),
             availability="LOCAL",
@@ -148,6 +149,11 @@ def test_v2_native_capture_replays_owner_verified_provisional_universe() -> None
     assert parsed.baseline.tracks[0].owner_identity_decision_id is not None
     assert parsed.baseline.tracks[0].identity_status == "PROVISIONAL"
     assert json.loads(row.payload)["ranking"]["items"]
+
+
+def test_v3_native_capture_replays_ordered_artist_acts() -> None:
+    parsed = decode(capture([], policy_version="3"))
+    assert parsed.baseline.tracks[0].artist_acts == ("lead", "guest")
 
 
 def facts_for(first: NativeCaptureRow) -> list[dict[str, Any]]:

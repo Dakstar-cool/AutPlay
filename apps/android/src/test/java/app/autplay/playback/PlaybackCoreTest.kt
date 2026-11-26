@@ -13,6 +13,9 @@ class PlaybackCoreTest {
         assertFalse(isResolvedPlaybackSource("autplay-unresolved", null))
         assertFalse(isResolvedPlaybackSource(null, null))
         assertTrue(isResolvedPlaybackSource("content", null))
+        assertTrue(isResolvedPlaybackSource(null, null, "LOCAL_URI"))
+        assertFalse(isResolvedPlaybackSource(null, "NO_AUDIO_SOURCE", "LOCAL_URI"))
+        assertFalse(isResolvedPlaybackSource("autplay-unresolved", null, "LOCAL_URI"))
     }
 
     @Test fun localSourceIsPreferredWithoutRequestingVault() {

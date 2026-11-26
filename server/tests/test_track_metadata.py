@@ -14,6 +14,7 @@ from autplay.domain.track_metadata import (
     album_group_for,
     automatic_candidate,
     lookup_title,
+    metadata_search_terms,
     native_album_group_for,
     parse_album_group,
     parse_source_metadata,
@@ -53,6 +54,58 @@ def test_manual_clear_and_correction_survive_late_provider_refresh() -> None:
     assert refreshed.fields == {"album": "Chosen", "release_date": None, "label": "Label"}
     assert refreshed.provenance["album"].source == "USER"
     assert refreshed.provenance["label"].source == "MUSICBRAINZ"
+
+
+def test_source_site_is_neither_a_search_term_nor_a_performer() -> None:
+    raw = MetadataQuery("Artist - Track [muzmo.ru]", "hitmos Artist", duration_ms=180000)
+    assert metadata_search_terms(raw.title, raw.artist) == (
+        ("Artist - Track", "Artist"),
+        ("Track", "Artist"),
+    )
+    candidate = MetadataCandidate(
+        "one", {"title": "Track", "artist": "Artist"}, 180000, 100, "release:one"
+    )
+    assert candidate.exact_for(raw)
+    assert not candidate.exact_for(replace(raw, artist="[muzmo.ru]"))
+    assert metadata_search_terms("Track", "[muzmo.ru]") == ()
+
+
+def test_featured_track_matches_both_catalogue_layouts_but_requires_the_guest() -> None:
+    from autplay.domain.catalog_artwork import recording_labels_match
+    from autplay.domain.catalogue_context import CatalogueContextEntity, CatalogueTrackCard
+
+    title, artist, guest = "Рядом быть", "После 11", "Хелависа"
+    credit, source = f"{artist} feat. {guest}", f"{title} feat. {guest}"
+    query = MetadataQuery(source, artist, duration_ms=283875)
+    terms = metadata_search_terms(source, artist)
+    assert (title, credit) in terms and (title, artist) in terms
+    candidate = MetadataCandidate(
+        "one", {"title": title, "artist": credit}, 284000, 100, "release:one"
+    )
+    assert candidate.exact_for(query)
+    assert replace(
+        candidate, fields={"title": f"{title} (ft. {guest})", "artist": artist}
+    ).exact_for(query)
+    assert replace(
+        candidate,
+        fields={"title": title, "artist": artist},
+        recording_title=source,
+        release_hydrated=True,
+        release_status="Official",
+    ).exact_for(query)
+    assert recording_labels_match(artist, source, credit, title)
+    mbid = UUID(int=1)
+    card = CatalogueTrackCard(
+        CatalogueContextEntity.RECORDING, mbid, mbid, source, artist, duration_ms=284000
+    )
+    assert card.corroborates(title=title, artist=credit, measured_duration_ms=283875)
+    for other in (artist, artist + " feat. Другой"):
+        assert not replace(candidate, fields={"title": title, "artist": other}).exact_for(query)
+        assert not recording_labels_match(artist, source, other, title)
+        assert not card.corroborates(title=title, artist=other, measured_duration_ms=283875)
+    assert not replace(candidate, fields={"title": title + " (Live)", "artist": credit}).exact_for(
+        query
+    )
 
 
 def test_auto_match_requires_unique_edition_and_duration_agreement() -> None:
@@ -137,6 +190,154 @@ def test_provider_version_disambiguation_is_a_hard_conflict(marker: str) -> None
         recording_disambiguation=marker,
     )
     assert not candidate.exact_for(MetadataQuery("Song", "Artist", duration_ms=180000))
+
+
+@pytest.mark.parametrize(
+    ("artist", "raw", "base", "edition", "duration"),
+    [
+        (
+            "Chinawoman",
+            "Left You At The Farm @16 тонн",
+            "Left You At The Farm",
+            "Live at 16 тонн",
+            304000,
+        ),
+        (
+            "Moto Boy",
+            "Life is wasted on the living | Monitor Sessions",
+            "Life is wasted on the living",
+            "Monitor Sessions",
+            223000,
+        ),
+        ("Максим Свобода", "По разные стороны (Mood Video)", "По разные стороны", None, 191000),
+        (
+            "Sam Tinnesz",
+            "Play With Fire | Stabal Session",
+            "Play With Fire",
+            "Stabal Session",
+            174927,
+        ),
+        (
+            "Sam Tinnesz",
+            "Play With Fire [Stabal ssesion]",
+            "Play With Fire",
+            "Stabal Session",
+            174927,
+        ),
+    ],
+)
+def test_source_performance_editions_and_video_wrappers(
+    artist: str, raw: str, base: str, edition: str | None, duration: int
+) -> None:
+    from autplay.domain.catalog_artwork import artwork_search_title, recording_labels_match
+    from autplay.domain.track_metadata import metadata_search_terms
+    from autplay.domain.track_names import project_names, track_names
+
+    query = MetadataQuery(raw, artist, duration_ms=duration)
+    display = f"{base} ({edition})" if edition else base
+    assert track_names(raw, artist) == (display, artist)
+    assert project_names({}, raw, artist)["fields"]["title"] == display
+    assert track_names(display, artist) == (display, artist)
+    assert lookup_title(raw, artist) == display
+    terms = metadata_search_terms(raw, artist)
+    assert terms[0] == (raw, artist) and (base, artist) in terms
+    assert artwork_search_title(raw, artist) == base
+    candidate = MetadataCandidate(
+        "hit", {"title": base, "artist": artist}, duration, 100, "release"
+    )
+    assert candidate.exact_for(query) == (edition is None)
+    assert recording_labels_match(artist, raw, artist, base) == (edition is None)
+    assert recording_labels_match(artist, raw, artist, display)
+    assert replace(candidate, recording_disambiguation=edition).exact_for(query)
+    assert not replace(candidate, fields={"title": display, "artist": "Other artist"}).exact_for(
+        query
+    )
+    assert not replace(candidate, recording_disambiguation="Other Sessions").exact_for(query)
+    if edition:
+        assert not replace(candidate, recording_disambiguation=edition).exact_for(
+            MetadataQuery(base, artist, duration_ms=duration)
+        )
+
+
+@pytest.mark.parametrize(
+    ("artist", "raw", "base", "edition", "catalog_title", "duration"),
+    [
+        ("кис-кис", "молчи speed up", "молчи", "Sped Up", "Молчи", 152400),
+        (
+            "aldn",
+            "icantbelieveiletyougetaway | High quality instrumental",
+            "icantbelieveiletyougetaway",
+            "Instrumental",
+            "i can\u2019t believe i let you get away",
+            135941,
+        ),
+        (
+            "Artist",
+            "Some Song [super slowed & reverb]",
+            "Some Song",
+            "Super Slowed + Reverb",
+            "Some Song",
+            186000,
+        ),
+    ],
+)
+def test_catalog_search_preserves_the_source_edition(
+    artist: str, raw: str, base: str, edition: str, catalog_title: str, duration: int
+) -> None:
+    from autplay.domain.catalog_artwork import artwork_search_title, recording_labels_match
+    from autplay.domain.track_metadata import metadata_search_terms
+    from autplay.domain.track_names import project_names, track_names
+
+    display = f"{base} ({edition})"
+    assert track_names(raw, artist) == track_names(display, artist) == (display, artist)
+    assert project_names({}, raw, artist)["fields"]["title"] == display
+    assert artwork_search_title(raw, artist) == base
+    terms = metadata_search_terms(raw, artist)
+    assert terms[0] == (raw, artist) and (base, artist) in terms
+    query = MetadataQuery(raw, artist, duration_ms=duration)
+    candidate = MetadataCandidate(
+        "hit", {"title": catalog_title, "artist": artist}, duration, 100, "release"
+    )
+    assert not candidate.exact_for(query)
+    assert replace(candidate, recording_disambiguation=edition).exact_for(query)
+    version = replace(candidate, fields={"title": f"{catalog_title} ({edition})", "artist": artist})
+    assert version.exact_for(query)
+    assert not replace(version, recording_disambiguation="Slowed").exact_for(query)
+    assert not replace(version, duration_ms=duration + 5000).exact_for(query)
+    assert not version.exact_for(replace(query, artist="Other Artist"))
+    assert recording_labels_match(artist, raw, artist, f"{catalog_title} ({edition})")
+    assert not recording_labels_match(artist, raw, artist, catalog_title)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Speed",
+        "Slow Down",
+        "Take It Slow",
+        "Never Speed Up",
+        "Instrumental",
+        "Slow Motion",
+        "Super Slowed",
+    ],
+)
+def test_literal_edit_words_remain_song_titles(title: str) -> None:
+    from autplay.domain.catalog_artwork import artwork_search_title
+    from autplay.domain.track_names import track_names
+
+    assert lookup_title(title) == title
+    assert track_names(title, None)[0] == title
+    assert artwork_search_title(title, "Artist") == title
+
+
+def test_joined_titles_require_all_letters_and_at_least_one_unsegmented_spelling() -> None:
+    from autplay.domain.title_edits import joined_title_matches
+
+    assert joined_title_matches("allthelittlethings", "All The Little Things")
+    assert not joined_title_matches("allthelittlethings", "All The Little Thorns")
+    assert not joined_title_matches("some thing else", "something else")
+    assert not joined_title_matches("allthelittlethings", "All / The Little Things")
+    assert not joined_title_matches("apart", "a part")
 
 
 def test_full_artist_credit_diacritics_and_collisions_are_preserved() -> None:

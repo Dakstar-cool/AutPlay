@@ -17,6 +17,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -80,9 +84,26 @@ object MediaDownloadComponents {
         val streamCache: SimpleCache,
         val downloadManager: DownloadManager,
         val downloadExecutor: ExecutorService,
-    )
+    ) {
+        // Media3 reports state transitions to listeners, while byte counters advance between callbacks.
+        internal val transferProgress by lazy {
+            flow {
+                while (true) {
+                    val downloads = downloadManager.currentDownloads
+                    emit(downloads.associate { download ->
+                        download.request.id to TransferProgress(download.bytesDownloaded, download.contentLength)
+                    })
+                    delay(if (downloadManager.isIdle) 1_500L else 500L)
+                }
+            }.stateIn(policyScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), emptyMap())
+        }
+    }
 
     // Leave bandwidth for foreground playback and its single Media3 successor preload.
     private const val MAX_PARALLEL_DOWNLOADS = 1
     private const val STREAM_CACHE_BYTES = 128L * 1024 * 1024
+}
+
+internal data class TransferProgress(val bytes: Long, val total: Long) {
+    val fraction: Double? get() = if (bytes >= 0 && total > 0) bytes.coerceAtMost(total).toDouble() / total else null
 }

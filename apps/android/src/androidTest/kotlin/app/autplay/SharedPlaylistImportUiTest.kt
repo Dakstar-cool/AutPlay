@@ -33,6 +33,8 @@ class SharedPlaylistImportUiTest {
             InstrumentationRegistry.getArguments().getString("playlistShareUi") == "true")
         val name = "AutPlay-QA-${UUID.randomUUID().toString().take(8)}"
         val filename = "$name.autplaylist"
+        val binding = app.autplay.application.sync.ClientEventBinding(app.autplay.domain.UserId(UUID.randomUUID().toString()),
+            app.autplay.domain.DeviceId(UUID.randomUUID().toString()), app.autplay.domain.ServerProfileId(UUID.randomUUID().toString()))
         val resolver = context.contentResolver
         val uri = checkNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, filename)
@@ -47,10 +49,12 @@ class SharedPlaylistImportUiTest {
                 "entries":[0,0]}""".toByteArray()) }
             resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
             runBlocking { settings.update(original.copy(appLanguage = "EN", pendingPublicId = "qa_playlist",
-                onboardingRevision = CURRENT_ONBOARDING_REVISION)) }
+                onboardingRevision = CURRENT_ONBOARDING_REVISION, activeServerProfileId = binding.serverProfileId,
+                activeUserId = binding.userId, deviceId = binding.deviceId, accountSignedOut = false)) }
             ActivityScenario.launch(MainActivity::class.java).use {
                 openPlaylists()
-                compose.onNodeWithText("Open playlist file").performClick()
+                compose.onNodeWithText("Import playlist").performClick()
+                compose.onNodeWithText("Choose TXT or AutPlay file").performClick()
                 val automation = instrumentation.uiAutomation
                 fun selectFromPicker(label: String): Boolean {
                     val root = automation.rootInActiveWindow ?: return false
@@ -69,7 +73,7 @@ class SharedPlaylistImportUiTest {
                 }
                 compose.waitUntil(10_000) { compose.onAllNodesWithText(name).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("Save a copy").performClick()
-                compose.waitUntil(10_000) { runBlocking { repository.playlists().first().any { p -> p.name == name } } }
+                compose.waitUntil(10_000) { runBlocking { repository.playlists(binding.serverProfileId.value).first().any { p -> p.name == name } } }
             }
             ActivityScenario.launch(MainActivity::class.java).use {
                 openPlaylists()
@@ -80,8 +84,8 @@ class SharedPlaylistImportUiTest {
         } finally {
             resolver.delete(uri, null, null)
             runBlocking {
-                repository.playlists().first().singleOrNull { it.name == name }?.let {
-                    repository.deletePlaylist(null, LocalId(it.localPlaylistId), LocalId.random(), System.currentTimeMillis())
+                repository.playlists(binding.serverProfileId.value).first().singleOrNull { it.name == name }?.let {
+                    repository.deletePlaylist(binding, LocalId(it.localPlaylistId), LocalId.random(), System.currentTimeMillis())
                 }
                 settings.update(original)
             }
@@ -150,8 +154,9 @@ class SharedPlaylistImportUiTest {
 
     private fun openPlaylists() {
         val label = localizedAppContext(InstrumentationRegistry.getInstrumentation().targetContext, app.autplay.ui.AppLanguage.English).getString(R.string.nav_library)
-        compose.waitUntil(12_000) { compose.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNode(hasText(label) and hasClickAction()).performClick()
+        val tab = androidx.compose.ui.test.hasContentDescription(label) and hasClickAction()
+        compose.waitUntil(12_000) { compose.onAllNodes(tab).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(tab).performClick()
         compose.onNodeWithTag("library-sections").performScrollToNode(hasTestTag("library-tab-Playlists"))
         compose.onNodeWithTag("library-tab-Playlists").performClick()
     }

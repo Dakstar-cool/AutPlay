@@ -366,6 +366,6 @@ def test_finalizer_rejects_dirty_source_before_creating_output(
 def test_repository_alembic_inventory_has_one_expected_head() -> None:
     identity = finalizer._alembic_identity()
 
-    assert identity["head"] == "0078_playlist_snapshots"
-    assert identity["revision_count"] == 79
-    assert identity["head_revision_path"].endswith("0078_playlist_snapshots.py")
+    assert identity["head"] == "0081_artist_onboarding"
+    assert identity["revision_count"] == 82
+    assert identity["head_revision_path"].endswith("0081_artist_onboarding.py")

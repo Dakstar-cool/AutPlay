@@ -12,7 +12,7 @@ import kotlinx.serialization.json.jsonObject
 
 /** Verify possession and the captured binding immediately before applying an account exit. */
 internal fun verifyLifecycleAuthorization(document: PortableAccountDocument, settings: NonSecretSettings,
-    action: RuntimeLifecycleAction, operationId: String, authorization: String) {
+    action: RuntimeLifecycleAction, operationId: String, authorization: String, otherDevice: app.autplay.domain.DeviceId? = null) {
     require(authorization.length in 2..16_384)
     val envelope = Json.parseToJsonElement(authorization).jsonObject
     require(envelope.keys == setOf("request", "proof"))
@@ -33,6 +33,7 @@ internal fun verifyLifecycleAuthorization(document: PortableAccountDocument, set
             challenge.number("identity_epoch") == binding.identityEpoch &&
             challenge.string("identity_thumbprint_sha256") == binding.identityThumbprintSha256)
     }
+    if (action == RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE) require(challenge.string("target_device_id") == (otherDevice ?: settings.deviceId)?.value)
     val expiry = Instant.parse(challenge.string("expires_at"))
     require(expiry.isAfter(Instant.now()) && expiry.isBefore(Instant.now().plusSeconds(180)))
     val public = KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(document.publicKeySpki))

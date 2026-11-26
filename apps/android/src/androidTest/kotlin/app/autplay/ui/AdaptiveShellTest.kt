@@ -93,11 +93,11 @@ class AdaptiveShellTest {
             }
         }
 
-        composeRule.onNodeWithText(context.getString(R.string.nav_search)).performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.nav_search)).performClick()
         val navigationBounds = composeRule.onNodeWithTag("compact-navigation").getUnclippedBoundsInRoot()
         assertEquals(61f, (navigationBounds.bottom - navigationBounds.top).value, 0.5f)
         composeRule.onNodeWithText("route:search").assertIsDisplayed()
-        composeRule.onNodeWithText(context.getString(R.string.nav_library)).performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.nav_library)).performClick()
         composeRule.onNodeWithText("route:library").assertIsDisplayed()
         composeRule.onNodeWithContentDescription(context.getString(R.string.action_open_profile_settings)).performClick()
         composeRule.onNodeWithText("route:settings").assertIsDisplayed()
@@ -289,7 +289,6 @@ class AdaptiveShellTest {
                         releases = listOf(HomeReleaseUiItem("release", "Local release", "Local artist", null)),
                         recommendations = emptyList(),
                         recentlyPlayed = listOf(HomeTrackUiItem("track", "Local recent", "Local artist")),
-                        playlists = listOf(CoreCollectionUiItem("playlist", "Local playlist", null)),
                         recommendationError = true,
                     ),
                     contentPadding = PaddingValues(),
@@ -307,8 +306,6 @@ class AdaptiveShellTest {
             .assertIsDisplayed()
         composeRule.onNodeWithTag("home-product-list").performScrollToNode(hasText("Local release"))
         composeRule.onNodeWithText("Local release").assertIsDisplayed()
-        composeRule.onNodeWithTag("home-product-list").performScrollToNode(hasText("Local playlist"))
-        composeRule.onNodeWithText("Local playlist").assertIsDisplayed()
         composeRule.onNodeWithTag("home-product-list")
             .performScrollToNode(hasText(context.getString(R.string.state_error_title)))
         composeRule.onNodeWithText(context.getString(R.string.state_error_title)).assertIsDisplayed()
@@ -578,7 +575,6 @@ class AdaptiveShellTest {
                 dislikeRecommendation = {},
                 retryHome = {},
                 resumeHomeQueue = {},
-                openHomePlaylist = {},
                 openOffline = {},
                 openProblems = {},
                 changeQuery = {},

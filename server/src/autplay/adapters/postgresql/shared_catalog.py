@@ -7,9 +7,12 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID, uuid5
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
+
+from autplay.adapters.postgresql.stage_credits import CATALOG_MEMBERS
+from autplay.domain.artist_credits import recording_credit
 
 # The operator publishes an exact variant. A later canonical replacement needs its own publication.
 PUBLISHED_AUDIO = """
@@ -33,6 +36,17 @@ PUBLISHED_AUDIO = """
           AND vr.replica_status = 'AVAILABLE' AND vr.storage_backend = 'LOCAL_FILESYSTEM'
           AND vr.verified_at IS NOT NULL)
 """
+
+# Public label cards are valid only for the exact catalog inputs they describe.
+PUBLIC_LABEL_JOIN = """
+    LEFT JOIN catalog.browse_page label
+    ON label.page_key='vault-display-v1:' || r.recording_id::text
+      AND label.document->>'source_title'=r.title
+      AND label.document->>'source_artist'=a.display_name
+      AND label.document->>'identity_status'=r.identity_status
+"""
+PUBLIC_TITLE = "coalesce(label.document->>'title',r.title)"
+PUBLIC_ARTIST = "coalesce(label.document->>'artist',a.display_name)"
 
 # The owner must still hold a playable library entry for this recording.
 OWNER_AUDIO = """
@@ -175,7 +189,8 @@ def prepare_catalog_wave(session: Session, user_id: UUID) -> None:
     picks = (
         session.execute(
             text(f"""
-        SELECT published.*, r.title, ac.display_name AS artist, v.duration_ms
+        SELECT published.*, r.title, ac.display_name AS artist, v.duration_ms,
+        {CATALOG_MEMBERS} AS members
         FROM ({PUBLISHED_AUDIO}) published
         JOIN catalog.recording r USING(recording_id)
         JOIN catalog.artist_credit ac USING(artist_credit_id)
@@ -210,37 +225,108 @@ def ensure_catalog_refs(session: Session, user_id: UUID, picks: Sequence[RowMapp
     for ref, pick in zip(refs, picks, strict=True):
         if ref not in present:
             entries.append(dict(pick, ref=ref, owner=user_id))
-    if not entries:
-        return refs
-    session.execute(
-        text("""
-        INSERT INTO library.user_track_ref
-            (user_track_ref_id,user_id,raw_title,raw_artist,raw_duration_ms)
-        VALUES (:ref,:owner,:title,:artist,:duration_ms)
-    """),
-        entries,
-    )
-    session.execute(
-        text("""
-        INSERT INTO library.user_track_ref_external_reference
-            (user_track_ref_id,external_reference_id,relation_role)
-        VALUES (:ref,:external_reference_id,'PRIMARY_SOURCE')
-    """),
-        entries,
-    )
-    session.execute(
-        text("""
-        INSERT INTO sync.sync_event(user_id,event_type,schema_version,aggregate_type,
-                                    aggregate_id,server_row_version,operation,payload)
-        VALUES (:owner,'USER_TRACK_REF_PATCHED',1,'USER_TRACK_REF',:ref,1,'UPSERT',
-            jsonb_build_object('recording_id',CAST(:recording_id AS text),
-                'title',CAST(:title AS text),
-                'artist',CAST(:artist AS text),'duration_ms',CAST(:duration_ms AS bigint),
-                'resolution_status','RESOLVED'))
-    """),
-        entries,
-    )
+    if entries:
+        session.execute(
+            text("""
+            INSERT INTO library.user_track_ref
+                (user_track_ref_id,user_id,raw_title,raw_artist,raw_duration_ms)
+            VALUES (:ref,:owner,:title,:artist,:duration_ms)
+        """),
+            entries,
+        )
+        session.execute(
+            text("""
+            INSERT INTO library.user_track_ref_external_reference
+                (user_track_ref_id,external_reference_id,relation_role)
+            VALUES (:ref,:external_reference_id,'PRIMARY_SOURCE')
+        """),
+            entries,
+        )
+        session.execute(
+            text("""
+            INSERT INTO sync.sync_event(user_id,event_type,schema_version,aggregate_type,
+                                        aggregate_id,server_row_version,operation,payload)
+            VALUES (:owner,'USER_TRACK_REF_PATCHED',1,'USER_TRACK_REF',:ref,1,'UPSERT',
+                jsonb_build_object('recording_id',CAST(:recording_id AS text),
+                    'title',CAST(:title AS text),
+                    'artist',CAST(:artist AS text),'duration_ms',CAST(:duration_ms AS bigint),
+                    'resolution_status','RESOLVED'))
+        """),
+            entries,
+        )
+    # Preserve the raw import evidence on the handle and publish inferred labels as ordinary
+    # metadata.
+    from autplay.adapters.postgresql.models import UserTrackRefRow
+    from autplay.adapters.postgresql.models.track_metadata import TrackMetadataRow
+    from autplay.application.catalog_artwork import catalog_image_evidence, inherit_catalog_images
+    from autplay.application.metadata_publication import save_name_revision
+    from autplay.domain.track_names import project_names
+
+    owned = {
+        ref.user_track_ref_id: ref
+        for ref in session.scalars(
+            select(UserTrackRefRow).where(
+                UserTrackRefRow.user_track_ref_id.in_(refs),
+                UserTrackRefRow.user_id == user_id,
+                UserTrackRefRow.deleted_at.is_(None),
+            )
+        )
+    }
+    metadata = {
+        row.user_track_ref_id: row
+        for row in session.scalars(
+            select(TrackMetadataRow).where(TrackMetadataRow.user_track_ref_id.in_(list(owned)))
+        )
+    }
+    targets = [
+        (owned[ref], pick, metadata.get(ref))
+        for ref, pick in zip(refs, picks, strict=True)
+        if ref in owned
+    ]
+    missing = [
+        pick["recording_id"]
+        for _, pick, row in targets
+        if not row or not row.artwork_sha256 or not row.document.get("catalog_artist_image_v1")
+    ]
+    images = catalog_image_evidence(session, missing)
+    for handle, pick, row in targets:
+        document = row.document if row else {}
+        if handle.user_track_ref_id not in present:
+            document = project_names(
+                document, pick["title"], pick["artist"], recording_credit(pick.get("members"))
+            )
+        document, cover = inherit_catalog_images(
+            images.get(pick["recording_id"], ()),
+            document,
+            row.artwork_sha256 if row else None,
+            pick["artist"],
+            pick["audio_variant_id"],
+            pick["title"],
+        )
+        if cover or document != (row.document if row else {}):
+            save_name_revision(
+                session, handle, row, document, pick["recording_id"], artwork_sha256=cover
+            )
     return refs
+
+
+def published_playback_handles(session: Session, owner: UUID) -> dict[UUID, dict[str, Any]]:
+    """Rebuild the same authorized recording hints on bootstrap as on initial publication."""
+    rows = session.execute(
+        text(f"""
+        SELECT u.user_track_ref_id, p.recording_id
+        FROM ({PUBLISHED_AUDIO}) p
+        JOIN library.user_track_ref_external_reference x USING(external_reference_id)
+        JOIN library.user_track_ref u USING(user_track_ref_id)
+        WHERE u.user_id=:owner AND u.deleted_at IS NULL AND u.recording_id IS NULL
+          AND x.relation_role='PRIMARY_SOURCE'
+    """),
+        {"owner": owner},
+    )
+    return {
+        ref: {"recording_id": str(recording), "resolution_status": "RESOLVED"}
+        for ref, recording in rows
+    }
 
 
 def playlist_catalog_handles(session: Session, owner: UUID) -> dict[UUID, dict[str, Any]]:

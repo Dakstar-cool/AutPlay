@@ -6,6 +6,15 @@ import org.junit.Test
 class LibrarySearchKindTest {
     private val builder = SafeFtsQueryBuilder()
 
+    @Test fun joinedSpellingOnlyExpandsTheTrackColumn() {
+        val phrase = "i can't believe i let you get away"
+        val alias = "title:(\"icantbelieveiletyougetaway\"*)"
+        for (kind in LibrarySearchKind.entries) {
+            assertEquals(kind == LibrarySearchKind.Track || kind == LibrarySearchKind.All,
+                builder.build(phrase, kind)?.contains(alias))
+        }
+    }
+
     @Test fun fieldFilterAppliesToEveryTermAndUsesStableWireNames() {
         val expected = listOf(
             LibrarySearchKind.All to "{title artist album}", LibrarySearchKind.Track to "title",

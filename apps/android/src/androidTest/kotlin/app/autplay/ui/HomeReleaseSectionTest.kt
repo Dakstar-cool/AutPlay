@@ -122,11 +122,12 @@ class HomeReleaseSectionTest {
     @Test fun emptyHomeOffersImportAndHidesAllEmptyCollections() {
         render(items = emptyList(), recentCount = 0)
         compose.onNodeWithTag("home-add-first-track").assertIsDisplayed()
-        compose.onNodeWithTag("home-releases-section").assertDoesNotExist()
+        compose.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-releases-section"))
+        compose.onNodeWithText("Пока нет подходящих новых релизов").assertIsDisplayed()
         val configuration = Configuration(context.resources.configuration).apply { setLocale(Locale.forLanguageTag("ru")) }
         val strings = context.createConfigurationContext(configuration)
         for (label in listOf(R.string.home_context_collections, R.string.home_recently_added, R.string.home_recommendations,
-                R.string.home_playlists, R.string.home_offline_ready, R.string.home_empty_releases)) {
+                R.string.home_playlists, R.string.home_offline_ready)) {
             compose.onNodeWithText(strings.getString(label)).assertDoesNotExist()
         }
         saveScreenshot("home-empty-collections.png")

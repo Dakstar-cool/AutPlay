@@ -87,6 +87,7 @@ internal fun AccountRecoveryCard(state: AccountRecoveryUiState, actions: Account
                     Button(onClick = actions.pickFile) { Text(stringResource(R.string.recovery_import)) }
                     OutlinedButton(onClick = { manualOpen = !manualOpen }) { Text(stringResource(R.string.recovery_manual)) }
                     if (manualOpen) {
+                        app.autplay.ui.SecureAccountWindow(true)
                         OutlinedTextField(origin, { if (it.length <= 2048) origin = it }, label = { Text(stringResource(R.string.recovery_server)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                         OutlinedTextField(account, { if (it.length <= 36) account = it }, label = { Text(stringResource(R.string.recovery_account_id)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                         OutlinedTextField(code, { if (it.length <= 96) code = it }, label = { Text(stringResource(R.string.recovery_code)) }, singleLine = true,

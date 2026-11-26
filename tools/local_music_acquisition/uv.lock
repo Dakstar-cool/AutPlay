@@ -74,6 +74,7 @@ name = "autplay-local-music-acquisition"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "mutagen" },
     { name = "playwright" },
     { name = "requests", extra = ["socks"] },
     { name = "urllib3" },
@@ -90,6 +91,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "mutagen", specifier = "==1.48.1" },
     { name = "playwright", specifier = "==1.60.0" },
     { name = "requests", extras = ["socks"], specifier = "==2.34.2" },
     { name = "urllib3", specifier = "==2.8.0" },

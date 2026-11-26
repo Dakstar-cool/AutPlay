@@ -17,14 +17,16 @@ import kotlinx.coroutines.withContext
 
 internal data class PlayerArtworkBackdrop(val header: Color, val surface: Color)
 
+internal data class ArtworkPalette(val dominant: Color, val accent: Color?)
+
 @Composable
-internal fun rememberArtworkTint(bitmap: Bitmap?): Color? = if (bitmap == null) null else key(bitmap) {
-    produceState<Color?>(null) { value = withContext(Dispatchers.Default) { dominantArtworkColor(bitmap) } }.value
+internal fun rememberArtworkPalette(bitmap: Bitmap?): ArtworkPalette? = if (bitmap == null) null else key(bitmap) {
+    produceState<ArtworkPalette?>(null) { value = withContext(Dispatchers.Default) { artworkPalette(bitmap) } }.value
 }
 
 @Composable
 internal fun rememberPlayerArtworkBackdrop(bitmap: Bitmap?): PlayerArtworkBackdrop {
-    val tint = rememberArtworkTint(bitmap)
+    val tint = rememberArtworkPalette(bitmap)?.dominant
     val colors = MaterialTheme.colorScheme
     val muted = AutPlayTokens.colors.mutedText
     val base = colors.background
@@ -32,8 +34,8 @@ internal fun rememberPlayerArtworkBackdrop(bitmap: Bitmap?): PlayerArtworkBackdr
     return remember(tint, colors, muted) {
         val dark = base.luminance() < 0.5f
         PlayerArtworkBackdrop(
-            header = readableTint(tint, base, if (dark) .62f else .36f, listOf(colors.onSurface)),
-            surface = readableTint(tint, base, if (dark) .15f else .09f, listOf(muted, colors.primary, colors.onSurface)),
+            header = readableTint(tint, base, if (dark) .74f else .42f, listOf(colors.onSurface)),
+            surface = readableTint(tint, base, if (dark) .21f else .12f, listOf(muted, colors.primary, colors.onSurface)),
         )
     }
 }
@@ -53,7 +55,7 @@ private fun readableTint(tint: Color, base: Color, strength: Float, foregrounds:
     return base
 }
 
-internal fun dominantArtworkColor(bitmap: Bitmap): Color? {
+private fun artworkPalette(bitmap: Bitmap): ArtworkPalette? {
     val width = minOf(bitmap.width, 32)
     val height = minOf(bitmap.height, 32)
     val sample = bitmap.scale(width, height, filter = true)
@@ -72,17 +74,31 @@ internal fun dominantArtworkColor(bitmap: Bitmap): Color? {
     }
     val best = weights.indices.maxBy { weights[it] }
     if (weights[best] == 0) return null
-    var red = 0
-    var green = 0
-    var blue = 0
-    var total = 0
-    for (pixel in pixels) {
-        if (bucket(pixel) != best) continue
-        val alpha = Pixel.alpha(pixel)
-        red += Pixel.red(pixel) * alpha
-        green += Pixel.green(pixel) * alpha
-        blue += Pixel.blue(pixel) * alpha
-        total += alpha
+    fun average(index: Int): Color {
+        var red = 0
+        var green = 0
+        var blue = 0
+        var total = 0
+        for (pixel in pixels) {
+            if (bucket(pixel) != index) continue
+            val alpha = Pixel.alpha(pixel)
+            red += Pixel.red(pixel) * alpha
+            green += Pixel.green(pixel) * alpha
+            blue += Pixel.blue(pixel) * alpha
+            total += alpha
+        }
+        return Color(red / total, green / total, blue / total)
     }
-    return Color(red / total, green / total, blue / total)
+    // A second, distinctly colored region gives the halo the same two tones as the cover.
+    val accent = weights.indices.filter { index ->
+        val r = index / 64
+        val g = index / 8 % 8
+        val b = index % 8
+        val dr = r - best / 64
+        val dg = g - best / 8 % 8
+        val db = b - best % 8
+        weights[index] > weights[best] / 12 && maxOf(r, g, b) - minOf(r, g, b) >= 2 &&
+            dr * dr + dg * dg + db * db >= 16
+    }.maxByOrNull { weights[it] }
+    return ArtworkPalette(average(best), accent?.let(::average))
 }

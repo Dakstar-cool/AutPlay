@@ -97,6 +97,7 @@ public enum class AutPlayIcon {
     Playlist,
     History,
     Download,
+    Downloaded,
     Import,
     Play,
     Wave,

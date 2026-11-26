@@ -1,7 +1,10 @@
 package app.autplay.playback
 
+import app.autplay.application.library.names
 import app.autplay.application.library.decoded
+import app.autplay.application.library.TrackMetadata
 import app.autplay.application.library.TrackMetadataRepository
+import app.autplay.data.local.entity.UserTrackRefEntity
 
 import android.content.Intent
 import androidx.core.net.toUri
@@ -22,6 +25,8 @@ import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionError
+import app.autplay.waveConnections
+import app.autplay.domain.wave.WavePrefetchMode
 import app.autplay.AutPlayRuntime
 import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.application.sync.ClientEventBinding
@@ -87,7 +92,9 @@ class AutPlayPlaybackService : MediaSessionService() {
     private var pendingTransitionMetrics: PlayerMetricsSnapshot? = null
     private val metadataTrack = MutableStateFlow<String?>(null)
     private val notificationTarget = MutableStateFlow<Pair<String?, String?>>(null to null)
+    private val queueHasSuccessor = MutableStateFlow(false)
     private var smoothTrackTransitions = false
+    private var repeatOnceEntry: String? = null
     private var personalWavePreload = false
     private val sourceTimelines = mutableMapOf<String, PlaybackSourceTimeline>()
     private val recovery = PlaybackRecoveryPolicy()
@@ -130,7 +137,8 @@ class AutPlayPlaybackService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(PlaybackNotification.sessionActivity(this))
             .setMediaButtonPreferences(PlaybackNotification.buttons(this, null, null, false))
-            .setCallback(AutPlaySessionCallback(packageName, ::handleNotificationFeedback, canUseAccount = { accountSignedOut == false }) { command ->
+            .setCallback(AutPlaySessionCallback(packageName, ::handleNotificationFeedback, canUseAccount = { accountSignedOut == false },
+                interceptEndedPlay = ::resumeEndedWave) { command ->
                 if (command == Player.COMMAND_STOP || command == Player.COMMAND_PLAY_PAUSE ||
                     command == Player.COMMAND_SET_MEDIA_ITEM || command == Player.COMMAND_CHANGE_MEDIA_ITEMS ||
                     command == Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM || command == Player.COMMAND_SEEK_TO_MEDIA_ITEM ||
@@ -142,20 +150,26 @@ class AutPlayPlaybackService : MediaSessionService() {
                 mediaSession.setMediaButtonPreferences(PlaybackNotification.buttons(this@AutPlayPlaybackService, entryId, null, false))
                 if (id == null) return@collectLatest
                 val ref = withContext(Dispatchers.IO) { database.libraryDao().trackRef(id) } ?: return@collectLatest
-                combine(database.libraryDao().observePreference(id), applicationNonSecretSettingsStore(applicationContext).settings) { preference, settings ->
-                    preference?.preference to (ref.deletedAtMs == null && ref.serverProfileId == (settings.activeServerProfileId?.value ?: "legacy-unscoped"))
-                }.collectLatest { (preference, owned) ->
+                combine(database.libraryDao().observePreference(id), applicationNonSecretSettingsStore(applicationContext).settings, queueHasSuccessor) { preference, settings, hasNext ->
+                    val owned = !settings.accountSignedOut && ref.deletedAtMs == null && ref.serverProfileId == (settings.activeServerProfileId?.value ?: "legacy-unscoped")
+                    val libraryNext = owned && !hasNext &&
+                        !app.autplay.application.recommendation.PersonalWaveSession.isPersonalQueue(restored?.snapshot?.sourceContextId) &&
+                        restored?.snapshot?.queueType in ORDINARY_QUEUE_TYPES &&
+                        database.libraryDao().nextPlayableLibraryTrack(ref.serverProfileId, id, settings.activeServerProfileId != null) != null
+                    Triple(preference?.preference, owned, libraryNext)
+                }.collectLatest { (preference, owned, libraryNext) ->
                     stateMutex.withLock {
                         val item = player.currentMediaItem ?: return@withLock
                         if (item.mediaId != entryId || item.mediaMetadata.extras?.getString("local_user_track_ref_id") != id) return@withLock
-                        mediaSession.setMediaButtonPreferences(PlaybackNotification.buttons(this@AutPlayPlaybackService, item.mediaId, preference, owned))
+                        mediaSession.setMediaButtonPreferences(PlaybackNotification.buttons(this@AutPlayPlaybackService, item.mediaId, preference, owned, libraryNext))
                     }
                 }
             }
         }
         scope.launch { restoreQueue(autoplay = false) }
+        val playbackSettings = applicationNonSecretSettingsStore(applicationContext).settings
         scope.launch {
-            applicationNonSecretSettingsStore(applicationContext).settings.collectLatest { settings ->
+            playbackSettings.collectLatest { settings ->
                 stateMutex.withLock {
                     accountSignedOut = settings.accountSignedOut
                     if (accountSignedOut == true) { recovery.cancel(); scheduledPlayJob?.cancel(); cancelWaveSynchronization(); player.pause() }
@@ -163,12 +177,20 @@ class AutPlayPlaybackService : MediaSessionService() {
                     if (activePlaybackProfileId != profileId) recovery.cancel()
                     activePlaybackProfileId = profileId
                     audioPreferences.value = settings.playbackAudio
-                    val preload = settings.wavePrefetchMode != "OFF"
-                    if (smoothTrackTransitions != settings.smoothTrackTransitions || personalWavePreload != preload) {
+                    if (smoothTrackTransitions != settings.smoothTrackTransitions) {
                         smoothTrackTransitions = settings.smoothTrackTransitions
-                        personalWavePreload = preload
                         updatePreloadConfiguration()
                     }
+                }
+            }
+        }
+        scope.launch {
+            combine(playbackSettings, waveConnections(getSystemService(android.net.ConnectivityManager::class.java))) { settings, link ->
+                link.prefetch(settings.downloadOnMeteredNetwork) != WavePrefetchMode.OFF
+            }.distinctUntilChanged().collectLatest { preload ->
+                stateMutex.withLock {
+                    personalWavePreload = preload
+                    updatePreloadConfiguration()
                 }
             }
         }
@@ -203,13 +225,14 @@ class AutPlayPlaybackService : MediaSessionService() {
                     .distinctUntilChanged()
                     .collectLatest { (metadata, art) ->
                         val description = metadata?.decoded()
+                        val names = description.names(ref.rawTitle, ref.rawArtist)
                         val bytes = withContext(Dispatchers.IO) { readArtwork(art?.filePath) }
                         stateMutex.withLock {
                             val item = player.currentMediaItem ?: return@withLock
                             if (item.mediaMetadata.extras?.getString("local_user_track_ref_id") != id) return@withLock
                             val updated = item.mediaMetadata.buildUpon()
-                                .setTitle(mediaText(description, "title", ref.rawTitle))
-                                .setArtist(mediaText(description, "artist", ref.rawArtist))
+                                .setTitle(names.title)
+                                .setArtist(names.artist)
                                 .setAlbumTitle(mediaText(description, "album", ref.rawAlbum))
                                 .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER).build()
                             if (updated != item.mediaMetadata) {
@@ -280,6 +303,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         val result = SettableFuture.create<SessionResult>()
         val job = scope.launch {
             try {
+                var nextSnapshot: LocalId? = null
                 stateMutex.withLock {
                     if (player.currentMediaItem?.mediaId != expectedEntryId) {
                         result.set(SessionResult(SessionError.ERROR_INVALID_STATE))
@@ -297,6 +321,33 @@ class AutPlayPlaybackService : MediaSessionService() {
                         result.set(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
                         return@withLock
                     }
+                    if (action == PlaybackNotification.ACTION_LIBRARY_NEXT) {
+                        val snapshot = restored?.snapshot
+                        if (snapshot == null || snapshot.queueType !in ORDINARY_QUEUE_TYPES || settings.accountSignedOut ||
+                            app.autplay.application.recommendation.PersonalWaveSession.isPersonalQueue(snapshot.sourceContextId)) {
+                            result.set(SessionResult(SessionError.ERROR_INVALID_STATE))
+                            return@withLock
+                        }
+                        if (hasDifferentSuccessor()) {
+                            player.seekToNextMediaItem()
+                            result.set(SessionResult(SessionResult.RESULT_SUCCESS))
+                            return@withLock
+                        }
+                        val next = database.libraryDao().nextPlayableLibraryTrack(ref.serverProfileId, trackId, binding != null)
+                        if (next == null) {
+                            result.set(SessionResult(SessionError.ERROR_INVALID_STATE))
+                            return@withLock
+                        }
+                        val entries = listOf(trackId, next).map { id -> app.autplay.application.playback.NewPlaybackQueueEntry(
+                            LocalId.random(), LocalId(id), "HOME", "LOCAL_THEN_VAULT") }
+                        val target = LocalId.random()
+                        persistence.activateQueue(target, entries, "USER", null, binding?.serverProfileId?.value, "GENERAL",
+                            System.currentTimeMillis(), startEntryId = entries.last().queueEntryId,
+                            ordinaryReplacementGuard = app.autplay.application.playback.OrdinaryQueueReplacementGuard(
+                                snapshot.queueSnapshotId, snapshot.queueType, snapshot.serverProfileId))
+                        nextSnapshot = target
+                        return@withLock
+                    }
                     val requested = if (action == PlaybackNotification.ACTION_LIKE) "LIKED" else "DISLIKED"
                     val preference = if (database.libraryDao().preference(trackId)?.preference == requested) "NEUTRAL" else requested
                     // Match the in-app Dislike behavior while keeping Wave movement authoritative.
@@ -308,6 +359,10 @@ class AutPlayPlaybackService : MediaSessionService() {
                         } else player.pause()
                     }
                     libraryRepository.setPlaybackPreference(binding, LocalId(trackId), LocalId.random(), preference, null, System.currentTimeMillis())
+                    result.set(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                nextSnapshot?.let {
+                    restoreQueue(autoplay = true, requiredSnapshotId = it.value)
                     result.set(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             } catch (error: CancellationException) {
@@ -359,10 +414,15 @@ class AutPlayPlaybackService : MediaSessionService() {
             )
             ACTION_PREVIOUS -> moveWithinOrdinaryQueue(next = false)
             ACTION_RESUME -> {
-                recovery.cancel()
                 val queue = restored
                 val entry = player.currentMediaItem?.mediaId
-                if (currentUnavailableReason() == PlaybackUnavailableReason.VAULT_NETWORK_UNAVAILABLE.name &&
+                val retryEntry = intent.getStringExtra(EXTRA_EXPECTED_QUEUE_ENTRY_ID)
+                if (retryEntry != null && (retryEntry != entry || queue?.snapshot?.queueType !in ORDINARY_QUEUE_TYPES)) {
+                    return START_NOT_STICKY
+                }
+                if (resumeEndedWave()) return START_NOT_STICKY
+                recovery.cancel()
+                if ((retryEntry != null || currentUnavailableReason() == PlaybackUnavailableReason.VAULT_NETWORK_UNAVAILABLE.name) &&
                     queue != null && entry != null) {
                     resolvedQueueEntryIds.remove(entry)
                     player.replaceMediaItem(player.currentMediaItemIndex, placeholder(entry))
@@ -389,7 +449,25 @@ class AutPlayPlaybackService : MediaSessionService() {
             }
             ACTION_SEEK -> player.seekTo(intent.getLongExtra(EXTRA_POSITION_MS, 0).coerceAtLeast(0))
             ACTION_SET_SHUFFLE -> player.shuffleModeEnabled = intent.getBooleanExtra(EXTRA_SHUFFLE_ENABLED, false)
-            ACTION_SET_REPEAT -> player.repeatMode = intent.getStringExtra(EXTRA_REPEAT_MODE).orEmpty().toMedia3RepeatMode()
+            ACTION_SET_REPEAT -> {
+                val entry = intent.getStringExtra(EXTRA_EXPECTED_QUEUE_ENTRY_ID)
+                if (entry == null) {
+                    repeatOnceEntry = null
+                    player.repeatMode = intent.getStringExtra(EXTRA_REPEAT_MODE).orEmpty().toMedia3RepeatMode()
+                } else if (player.currentMediaItem?.mediaId == entry && restored?.snapshot?.queueType in ORDINARY_QUEUE_TYPES &&
+                    player.currentMediaItem.isResolvedPlaybackSource()) {
+                    when {
+                        repeatOnceEntry == entry -> repeatOnceEntry = null
+                        player.repeatMode == Player.REPEAT_MODE_ONE -> player.repeatMode = Player.REPEAT_MODE_OFF
+                        else -> {
+                            repeatOnceEntry = entry
+                            player.repeatMode = Player.REPEAT_MODE_ONE
+                        }
+                    }
+                } else return START_NOT_STICKY
+                publishRuntimeState()
+                scope.launch { stateMutex.withLock { checkpointPlayerStateLocked() } }
+            }
             ACTION_SCHEDULED_PLAY -> {
                 cancelWaveSynchronization()
                 scheduledPlayJob?.cancel()
@@ -510,7 +588,9 @@ class AutPlayPlaybackService : MediaSessionService() {
             player.setMediaItems(placeholders, index, queue.media.currentPositionMs)
             player.seekTo(index, queue.media.currentPositionMs)
             player.playWhenReady = autoplay
-            player.repeatMode = queue.snapshot.repeatMode.toMedia3RepeatMode()
+            repeatOnceEntry = queue.snapshot.currentEntryId?.takeIf { queue.snapshot.repeatMode == "ONCE" && it == queue.entries[index].queueEntryId }
+            player.repeatMode = if (queue.snapshot.repeatMode == "ONCE" && repeatOnceEntry == null) Player.REPEAT_MODE_OFF
+                else queue.snapshot.repeatMode.toMedia3RepeatMode()
             shuffleSeed = queue.snapshot.seed
             if (queue.snapshot.shuffleMode != "OFF") {
                 val seed = shuffleSeed ?: queue.snapshot.queueSnapshotId.hashCode().toLong().also { shuffleSeed = it }
@@ -761,8 +841,9 @@ class AutPlayPlaybackService : MediaSessionService() {
             val metadataDatabase = AutPlayRuntime.database(applicationContext)
             val originalTrack = metadataDatabase.libraryDao().trackRef(entry.localUserTrackRefId)
             val description = originalTrack?.let { metadataDatabase.trackMetadataDao().get(it.serverProfileId, it.localUserTrackRefId)?.decoded() }
-            val track = if (description == null) originalTrack else originalTrack.copy(
-                rawTitle = mediaText(description, "title", originalTrack.rawTitle), rawArtist = mediaText(description, "artist", originalTrack.rawArtist), rawAlbum = mediaText(description, "album", originalTrack.rawAlbum))
+            val names = description.names(originalTrack?.rawTitle, originalTrack?.rawArtist)
+            val track = originalTrack?.copy(rawTitle = names.title, rawArtist = names.artist,
+                rawAlbum = mediaText(description, "album", originalTrack.rawAlbum))
             val artwork = if (track != null && description?.artworkSha256 != null) metadataDatabase.trackMetadataDao().artwork(track.serverProfileId, description.artworkSha256) else null
             val artworkBytes = readArtwork(artwork?.filePath)
             when (val resolved = sourceResolver.resolve(LocalId(entry.localUserTrackRefId), System.currentTimeMillis())) {
@@ -779,6 +860,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                     item = MediaItem.Builder()
                         .setMediaId(entry.queueEntryId)
                         .setUri(resolved.value.runtimeUri)
+                        .setTag(gainForSource(resolved.value, originalTrack, description))
                         .setMediaMetadata(
                             MediaMetadata.Builder()
                                 .setTitle(track?.rawTitle ?: "Unavailable title")
@@ -799,6 +881,30 @@ class AutPlayPlaybackService : MediaSessionService() {
                 )
             }
         }
+
+    private suspend fun gainForSource(source: ResolvedPlaybackSource, track: UserTrackRefEntity?,
+        description: TrackMetadata?): ServerLoudness? {
+        val reference = track?.serverUserTrackRefId ?: return null
+        serverLoudness(description?.payload, source, track.serverProfileId)?.let { return it }
+        // A catalogue track may start streaming before its first metadata sync.
+        if (source.source != SelectedAudioSource.VAULT_STREAM || (description?.revision ?: 0) > 0 ||
+            audioPreferences.value.replayGainMode == "OFF") return null
+        val active = applicationNonSecretSettingsStore(applicationContext).settings.first()
+        val profile = active.activeServerProfileId ?: return null
+        if (active.accountSignedOut || profile.value != source.runtimeUri.authority || profile.value != track.serverProfileId) return null
+        val binding = ClientEventBinding(active.activeUserId ?: return null, active.deviceId ?: return null, profile)
+        return try {
+            kotlinx.coroutines.withTimeoutOrNull(1_200) {
+                val payload = AutPlayRuntime.serverFeatures(applicationContext, binding).trackMetadata(reference)
+                TrackMetadataRepository(applicationContext).project(profile.value, track.localUserTrackRefId, payload)
+                serverLoudness(payload, source, profile.value)
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun mediaText(description: app.autplay.application.library.TrackMetadata?, field: String, fallback: String?): String? =
         // Media3 fills nulls from embedded tags; an explicit user clear must override them.
@@ -1256,7 +1362,58 @@ class AutPlayPlaybackService : MediaSessionService() {
         if (changed) publishRuntimeState()
     }
 
+    private fun resumeEndedWave(): Boolean {
+        val queue = restored ?: return false
+        if (player.playbackState != Player.STATE_ENDED ||
+            !app.autplay.application.recommendation.PersonalWaveSession.isPersonalQueue(queue.snapshot.sourceContextId))
+            return false
+        val entryId = player.currentMediaItem?.mediaId ?: return false
+        scope.launch {
+            stateMutex.withLock {
+                if (restored !== queue || player.currentMediaItem?.mediaId != entryId ||
+                    player.playbackState != Player.STATE_ENDED) return@withLock
+                val extended = extendWaveIfNeeded(queue)
+                if (extended.entries.size > queue.entries.size) {
+                    player.seekTo(queue.entries.size, 0L)
+                    scheduleQueueResolution(extended, queueGeneration)
+                    player.play()
+                }
+            }
+        }
+        return true
+    }
+
+    private suspend fun extendWaveIfNeeded(queue: RestoredPlaybackQueue): RestoredPlaybackQueue {
+        val current = player.currentMediaItemIndex
+        if (!app.autplay.application.recommendation.PersonalWaveSession.isPersonalQueue(queue.snapshot.sourceContextId) ||
+            current !in queue.entries.indices || (current < queue.entries.size - 3 && hasDifferentSuccessor()) ||
+            player.repeatMode != Player.REPEAT_MODE_OFF) return queue
+        val settings = applicationNonSecretSettingsStore(applicationContext).settings.first()
+        if (settings.accountSignedOut) return queue
+        val binding = settings.activeUserId?.let { user ->
+            val device = settings.deviceId ?: return@let null
+            val profile = settings.activeServerProfileId ?: return@let null
+            ClientEventBinding(user, device, profile)
+        }
+        val additions = persistence.extendWave(queue.snapshot.queueSnapshotId, queue.entries.last().queueEntryId,
+            queue.entries.size, binding, app.autplay.myWaveNetworkAvailable(applicationContext))
+        if (additions.isEmpty()) return queue
+        val updated = queue.copy(entries = queue.entries + additions)
+        restored = updated
+        queueEntryIndices = updated.entries.mapIndexed { i, entry -> entry.queueEntryId to i }.toMap()
+        val ended = player.playbackState == Player.STATE_ENDED && player.playWhenReady && stopAfterQueueEntryId == null
+        player.addMediaItems(additions.map { placeholder(it.queueEntryId) })
+        if (ended) player.seekTo(queue.entries.size, 0L)
+        return updated
+    }
+
+    private fun hasDifferentSuccessor(activePlayer: Player = player) =
+        activePlayer.hasNextMediaItem() && activePlayer.nextMediaItemIndex != activePlayer.currentMediaItemIndex
+
     private inner class PlayerListener : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) {
+            queueHasSuccessor.value = hasDifferentSuccessor(player)
+        }
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             val generation = queueGeneration
             val playingEntryId = player.currentMediaItem?.mediaId
@@ -1277,6 +1434,11 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val armed = repeatOnceEntry
+            if (armed != null && (mediaItem?.mediaId != armed || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)) {
+                repeatOnceEntry = null
+                player.repeatMode = Player.REPEAT_MODE_OFF
+            }
             if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) recovery.cancel()
             metadataTrack.value = mediaItem?.mediaMetadata?.extras?.getString("local_user_track_ref_id")
             notificationTarget.value = mediaItem?.mediaId to metadataTrack.value
@@ -1300,7 +1462,7 @@ class AutPlayPlaybackService : MediaSessionService() {
                     }
                     if (current != null && !isSameRestore) finalizeCurrentLocked(transitionMetrics)
                     val queue = restored ?: return@withLock
-                    scheduleQueueResolution(queue, queueGeneration)
+                    scheduleQueueResolution(extendWaveIfNeeded(queue), queueGeneration)
                     if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK && player.currentMediaItem?.mediaId == mediaItem?.mediaId) {
                         // An explicit skip may leave a failed remote source for an already resolved local one.
                         settleCurrentSource(allowRetry = true)
@@ -1379,6 +1541,7 @@ class AutPlayPlaybackService : MediaSessionService() {
         }
 
         override fun onRepeatModeChanged(repeatMode: Int) {
+            if (repeatMode != Player.REPEAT_MODE_ONE) repeatOnceEntry = null
             scope.launch {
                 stateMutex.withLock {
                     checkpointPlayerStateLocked()
@@ -1393,7 +1556,10 @@ class AutPlayPlaybackService : MediaSessionService() {
             if (playbackState == Player.STATE_ENDED) scope.launch {
                 stateMutex.withLock {
                     // Only finalize if no queued command has replaced the ended queue.
-                    if (player.playbackState == Player.STATE_ENDED) finalizeCurrentLocked(capturePlayerMetrics())
+                    if (player.playbackState == Player.STATE_ENDED) {
+                        finalizeCurrentLocked(capturePlayerMetrics())
+                        restored?.let { scheduleQueueResolution(extendWaveIfNeeded(it), queueGeneration) }
+                    }
                 }
             }
             else scope.launch { stateMutex.withLock { publishRuntimeState() } }
@@ -1421,13 +1587,13 @@ class AutPlayPlaybackService : MediaSessionService() {
     }
 
     private fun String.toMedia3RepeatMode(): Int = when (this) {
-        "ONE" -> Player.REPEAT_MODE_ONE
+        "ONE", "ONCE" -> Player.REPEAT_MODE_ONE
         "ALL" -> Player.REPEAT_MODE_ALL
         else -> Player.REPEAT_MODE_OFF
     }
 
     private fun Int.fromMedia3RepeatMode(): String = when (this) {
-        Player.REPEAT_MODE_ONE -> "ONE"
+        Player.REPEAT_MODE_ONE -> if (repeatOnceEntry != null) "ONCE" else "ONE"
         Player.REPEAT_MODE_ALL -> "ALL"
         else -> "OFF"
     }
@@ -1513,11 +1679,13 @@ internal class AutPlaySessionCallback(
         Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
     },
     private val canUseAccount: () -> Boolean = { true },
+    private val interceptEndedPlay: () -> Boolean = { false },
     private val onPlayerCommand: (Int) -> Unit = {},
 ) : MediaSession.Callback {
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onPlayerCommandRequest(session: MediaSession, controller: MediaSession.ControllerInfo, playerCommand: Int): Int {
         if (!canUseAccount() || !isControllerAllowed(controller.packageName, controller.isTrusted)) return SessionError.ERROR_PERMISSION_DENIED
+        if (playerCommand == Player.COMMAND_PLAY_PAUSE && interceptEndedPlay()) return SessionResult.RESULT_INFO_SKIPPED
         onPlayerCommand(playerCommand)
         return SessionResult.RESULT_SUCCESS
     }
@@ -1541,7 +1709,7 @@ internal class AutPlaySessionCallback(
         if (!canUseAccount() || !isControllerAllowed(controller.packageName, controller.isTrusted)) {
             return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
         }
-        if (customCommand.customAction !in setOf(PlaybackNotification.ACTION_LIKE, PlaybackNotification.ACTION_DISLIKE)) {
+        if (customCommand.customAction !in setOf(PlaybackNotification.ACTION_LIKE, PlaybackNotification.ACTION_DISLIKE, PlaybackNotification.ACTION_LIBRARY_NEXT)) {
             return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
         }
         val entryId = args.getString(PlaybackNotification.EXTRA_QUEUE_ENTRY_ID)

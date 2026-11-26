@@ -62,7 +62,7 @@ class ShadowAdaptiveUserRepresentation:
     """P11-compatible baseline values plus an optional immutable temporal profile."""
 
     version: str
-    liked_artists: frozenset[str]
+    liked_artists: dict[str, float]
     listened_artists: frozenset[str]
     liked_tokens: frozenset[str]
     adaptive_profile: AdaptiveProfile | None

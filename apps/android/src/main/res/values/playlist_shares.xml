@@ -4,9 +4,13 @@
     <string name="playlist_share_link">Create link</string>
     <string name="playlist_share_needs_server">Connect a server profile to create a link.</string>
     <string name="playlist_share_error">Could not create the link. Check your connection and try again.</string>
-    <string name="playlist_import_file">Open playlist file</string>
-    <string name="playlist_invalid_file">This file could not be opened as an AutPlay playlist.</string>
-    <string name="playlist_save_count">Tracks in this version: %1$d</string>
+    <string name="playlist_import_file">Import playlist</string>
+    <string name="playlist_choose_file">Choose TXT or AutPlay file</string>
+    <string name="playlist_link">AutPlay playlist link</string>
+    <string name="playlist_preview">Open</string>
+    <string name="playlist_import_needs_account">Sign in to the account where you want to save the playlist.</string>
+    <string name="playlist_invalid_file">Could not open the playlist. Check the link or choose an AutPlay file or a text list with one Artist — Title per line.</string>
+    <string name="playlist_save_count">Tracks in this playlist: %1$d.</string>
     <string name="playlist_save_copy">Save a copy</string>
     <string name="playlist_copy_saved">Playlist saved</string>
     <string name="playlist_save_error">Could not save the playlist. Try again.</string>

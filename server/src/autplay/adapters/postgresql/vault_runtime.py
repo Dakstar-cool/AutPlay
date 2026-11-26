@@ -57,6 +57,7 @@ from autplay.application.job_worker import JobLeaseLost
 from autplay.application.music_library import MusicLibraryService
 from autplay.application.sync import CatalogArtistSyncPublisher
 from autplay.application.vault_ingest import IngestSession
+from autplay.application.vault_names import project_owner_names, refresh_recording
 from autplay.application.vault_streaming import AuthorizedStream
 from autplay.application.vault_uploads import (
     CreateUploadCommand,
@@ -709,6 +710,11 @@ class PostgresVaultRuntime(UploadRepository):
             )
             source.state, source.audio_variant_id, source.error_code = "READY", canonical, None
             source.updated_at = datetime.now(UTC)
+            from autplay.application.track_metadata import TrackMetadataService
+
+            self._session.flush()
+            TrackMetadataService.publish_staged_names(self._session, source.user_track_ref_id)
+        refresh_recording(self._session, variant.recording_id, apply=True, ingest=True)
         self._audit(session, "vault.ingest_reused" if reused else "vault.ingest_committed")
         self._session.flush()
         return True
@@ -1095,6 +1101,10 @@ class PostgresVaultRuntime(UploadRepository):
         attempt.updated_at = now
         attempt.row_version += 1
         CatalogArtistSyncPublisher().publish(self._session, upload.user_id)
+        ref = self._session.get(UserTrackRefRow, candidate.user_track_ref_id, with_for_update=True)
+        if ref is None or ref.user_id != upload.user_id or ref.recording_id != variant.recording_id:
+            raise UploadStateError()
+        project_owner_names(self._session, ref, variant.recording_id)
         self._session.add(
             SyncEventRow(
                 event_id=uuid5(

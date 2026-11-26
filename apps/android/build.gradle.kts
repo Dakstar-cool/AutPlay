@@ -63,8 +63,8 @@ android {
         applicationId = if (qaSideBySide) "app.autplay.qa" else "app.autplay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 37
-        versionName = "1.0.14"
+        versionCode = 40
+        versionName = "1.0.17"
         releaseVersionCodeOverride?.let { versionCode = it }
         releaseVersionNameOverride?.let { versionName = it }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -106,8 +106,10 @@ android {
 
     // Compile the shared theme against AndroidX Compose on Android and JetBrains Compose on desktop.
     sourceSets.named("main") {
+        resources.srcDir("../../server/src/autplay/domain/labels")
         kotlin.directories += "../../shared/ui/src/commonMain/kotlin/app/autplay/ui/theme"
         kotlin.directories += "../../shared/ui/src/jvmMain/kotlin/app/autplay/wave"
+        kotlin.directories += "../../shared/ui/src/jvmMain/kotlin/app/autplay/welcome"
     }
 
     buildFeatures {

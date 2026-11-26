@@ -240,15 +240,22 @@ class PortableAccountRuntime(
         }
     }
 
-    private suspend fun confirmLifecycleInternal(action: RuntimeLifecycleAction, login: String, password: CharArray) {
+    suspend fun revokeOtherDevice(device: app.autplay.domain.DeviceId, login: String, password: CharArray): Boolean = command {
+        require(device != settings.settings.first().deviceId)
+        confirmLifecycleInternal(RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE, login, password, device)
+    }
+
+    private suspend fun confirmLifecycleInternal(action: RuntimeLifecycleAction, login: String, password: CharArray,
+        otherDevice: app.autplay.domain.DeviceId? = null) {
         require(!credentials.hasPortableAccountPendingEnrollment()) { "ACCOUNT_CONNECTION_OUTCOME_PENDING" }
         require(store.verify(login, password)) { "ACCOUNT_AUTHENTICATION_FAILED" }
         val document = requireNotNull(store.read())
         val current = settings.settings.first()
         val binding = requireNotNull(current.m5Binding)
-        beforeDisconnect(requireNotNull(current.activeServerProfileId), requireNotNull(store.ownership()))
+        if (otherDevice == null) beforeDisconnect(requireNotNull(current.activeServerProfileId), requireNotNull(store.ownership()))
         val operation = pairing.state.value.lastUnknownLifecycle?.takeIf {
-            it.action.name == (if (action == RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE) "REVOKE_DEVICE" else action.name)
+            it.targetDeviceId == (if (action == RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE) otherDevice ?: current.deviceId else null) &&
+                it.action.name == (if (action == RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE) "REVOKE_DEVICE" else action.name)
         }?.operationId ?: UUID.randomUUID().toString()
         PortableAccountCrypto.unlock(document, password).use { unlocked ->
             val request = if (action == RuntimeLifecycleAction.DISCONNECT_LOCAL) buildJsonObject {
@@ -264,14 +271,14 @@ class PortableAccountRuntime(
                 val body = buildJsonObject {
                     put("action", if (action == RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE) "REVOKE_DEVICE" else action.name)
                     put("operation_id", operation)
-                    put("target_device_id", if (action == RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE) JsonPrimitive(current.deviceId!!.value) else JsonNull)
+                    put("target_device_id", if (action == RuntimeLifecycleAction.REVOKE_CURRENT_DEVICE) JsonPrimitive((otherDevice ?: requireNotNull(current.deviceId)).value) else JsonNull)
                 }
                 val challenge = transport.request("/portable-accounts/reauth-challenge", body, current.activeServerProfileId)
                 verifyChallenge(challenge, document, binding.serverInstanceId, binding.identityEpoch, binding.identityThumbprintSha256,
                     requireNotNull(current.serverBaseUrl), requireNotNull(current.streamBaseUrl), "REAUTH")
                 challenge
             }
-            require(pairing.performConfirmedLifecycle(action, operation, signed(unlocked, "reauth", request).toString())) { "ACCOUNT_EXIT_UNAVAILABLE" }
+            require(pairing.performConfirmedLifecycle(action, operation, signed(unlocked, "reauth", request).toString(), otherDevice)) { "ACCOUNT_EXIT_UNAVAILABLE" }
         }
         mutableState.value = mutableState.value.copy(serverCopyReady = false)
         refreshState()

@@ -4,7 +4,6 @@
     <string name="home_my_wave_empty">Сейчас нет доступной музыки. Добавьте локальный трек, скачайте музыку или подключитесь к серверу.</string>
     <string name="home_my_wave_syncing">Библиотека синхронизируется. Попробуйте запустить воспроизведение, когда появятся первые треки.</string>
     <string name="home_wheel_sleep">Перед сном</string>
-    <string name="home_wheel_preview">Предпросмотр подборки</string>
     <string name="home_wheel_play">Слушать · %1$s</string>
     <string name="home_wheel_unavailable">Сейчас для этой подборки нет доступных рекомендаций.</string>
     <string name="home_wheel_calm">Спокойствие</string>
@@ -14,5 +13,4 @@
     <string name="home_wheel_electronic">Электроника</string>
     <string name="home_wheel_jazz">Джаз</string>
     <string name="home_wheel_classical">Классика</string>
-    <string name="home_wave_on_device">На устройстве</string>
 </resources>

@@ -36,6 +36,7 @@ class CatalogProcessCoordinator(_IngestCoordinator[CatalogExecutionTicket]):
         *,
         tree_factory: ProcessTreeFactory,
         proxy: str | None = None,
+        discogs_token: str | None = None,
         maximum: int = 2,
         on_drained: Callable[[], None] | None = None,
         launch: ChildLaunch | None = None,
@@ -45,7 +46,8 @@ class CatalogProcessCoordinator(_IngestCoordinator[CatalogExecutionTicket]):
             None,
             tree_factory=tree_factory,
             maximum=maximum,
-            launch=launch or (lambda: catalog_child_launch(proxy=proxy)),
+            launch=launch
+            or (lambda: catalog_child_launch(proxy=proxy, discogs_token=discogs_token)),
             on_drained=on_drained,
             error_prefix="metadata",
         )

@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 import rfc8785
 from sqlalchemy import String, cast, exists, func, select, true, update
@@ -27,7 +27,6 @@ from autplay.adapters.postgresql.models import (
     LibraryEntryRow,
     ProviderStagingRow,
     RecordingCanonicalVariantRow,
-    SyncEventRow,
     UserTrackRefRow,
 )
 from autplay.adapters.postgresql.models.account import UserAccountRow
@@ -39,15 +38,19 @@ from autplay.adapters.postgresql.models.track_metadata import (
     TrackMetadataRow,
 )
 from autplay.adapters.postgresql.vault_runtime import PostgresVaultRuntime
+from autplay.application.catalog_artwork import attach_images
 from autplay.application.internet_acquisition import InternetAcquisitionTarget
 from autplay.application.job_worker import JobExecutionContext, JobLeaseLost
 from autplay.application.metadata_projection import coherent_album_group, metadata_view
+from autplay.application.metadata_publication import publish_metadata_revision
 from autplay.application.music_library import MusicError, MusicLibraryService
 from autplay.application.sync import _acquire_sync_owner_publish_lock
 from autplay.application.vault_uploads import VaultNotFoundError
 from autplay.domain.auth import Principal
+from autplay.domain.catalog_artwork import ArtMatch
 from autplay.domain.catalogue_context import CatalogueLookupContext
 from autplay.domain.jobs import JobKey, RetryableJobError
+from autplay.domain.original_artwork import original_artwork_source
 from autplay.domain.resource_admission import AcquisitionClaim, ResourceAdmissionError
 from autplay.domain.track_metadata import (
     FieldEvidence,
@@ -59,9 +62,10 @@ from autplay.domain.track_metadata import (
     validate_fields,
 )
 from autplay.ports.jobs import EnqueueJob
+from autplay.ports.track_metadata import TrackLoudness
 
 METADATA_JOB = JobKey("music.metadata.enrich", 1)
-METADATA_ENRICHMENT_VERSION = 2
+METADATA_ENRICHMENT_VERSION = 3
 
 
 def acquisition_sha256(document: dict[str, Any]) -> str:
@@ -151,8 +155,26 @@ class TrackMetadataService:
             "acquisition_refresh_pending": True,
             "album_group_v1": selected_group,
         }
+        native = normalized.get("fields")
+        if isinstance(native, dict):
+            names = validate_fields(
+                {key: native[key] for key in ("title", "artist", "composer") if key in native}
+            )
+            if names:
+                proof = FieldEvidence(
+                    "SOURCE_NATIVE",
+                    f"{normalized['provider']}:{normalized['source_id']}",
+                    datetime.now(UTC).isoformat(),
+                )
+                doc = document_from(row).merge(names, proof, fill_only=True)
+                row.document = {
+                    **row.document,
+                    "fields": doc.fields,
+                    "provenance": {key: asdict(value) for key, value in doc.provenance.items()},
+                }
         art = row.document.get("artwork_source") or {}
-        if selected_group is None and art.get("source") == "MUSICBRAINZ" and not art.get("locked"):
+        stale_edition_art = selected_group is None and art.get("source") == "MUSICBRAINZ"
+        if (stale_edition_art or original_artwork_source(art)) and not art.get("locked"):
             row.artwork_sha256 = None
             row.document = {**row.document, "artwork_source": None}
         return True
@@ -348,6 +370,19 @@ class TrackMetadataService:
             "acquisition_refresh_pending": True,
         }
 
+    @staticmethod
+    def publish_staged_names(session: Session, ref_id: UUID) -> None:
+        """The ingest transaction holds the owner lock and has made the verified source ready."""
+        row = session.get(TrackMetadataRow, ref_id, with_for_update=True)
+        if row is None or not row.document.get("pending_acquisition_id"):
+            return
+        ref = session.get(UserTrackRefRow, ref_id)
+        if ref is None:
+            return
+        TrackMetadataService._activate_staged_acquisition(session, ref, row)
+        if not row.document.get("pending_acquisition_id"):
+            publish_metadata_revision(session, ref, row)
+
     def accept_acquisition(
         self,
         principal: Principal,
@@ -494,6 +529,7 @@ class TrackMetadataService:
                 )
                 session.add(row)
             if action == "EDIT":
+                prior_fields = row.document.get("fields", {})
                 doc = document_from(row).merge(
                     validated,
                     FieldEvidence("USER", f"edit:{operation_id}", datetime.now(UTC).isoformat()),
@@ -503,6 +539,26 @@ class TrackMetadataService:
                     "fields": doc.fields,
                     "provenance": {key: asdict(value) for key, value in doc.provenance.items()},
                 }
+                original = {
+                    "title": ref.raw_title,
+                    "artist": ref.raw_artist,
+                    "album": ref.raw_album,
+                }
+                changed = {
+                    key
+                    for key in original
+                    if key in validated and prior_fields.get(key, original[key]) != validated[key]
+                }
+                if (
+                    changed
+                    and (row.document.get("artwork_source") or {}).get("source") == "PUBLIC_CATALOG"
+                ):
+                    row.artwork_sha256 = None
+                    row.document = {**row.document, "artwork_source": None}
+                if "artist" in changed:
+                    row.document = {
+                        k: v for k, v in row.document.items() if k != "catalog_artist_image_v1"
+                    }
                 row.generation = max(1, row.generation)
                 if row.job_id is None:
                     row.state = "READY"
@@ -787,67 +843,17 @@ class TrackMetadataService:
         with self.sessions.begin() as session:
             MusicLibraryService._owned_ref(session, principal.user_id, ref_id)
             row = session.get(TrackMetadataRow, ref_id)
-            if row is None or row.artwork_sha256 != sha256:
+            if row is None or sha256 not in {
+                row.artwork_sha256,
+                (row.document.get("catalog_artist_image_v1") or {}).get("sha256"),
+            }:
                 raise MusicError("metadata_artwork_missing", "The artwork is unavailable.", 404)
             art = session.get(MetadataArtworkRow, sha256)
             if art is None:
                 raise MusicError("metadata_artwork_missing", "The artwork is unavailable.", 404)
             return art.content
 
-    @staticmethod
-    def _publish(
-        session: Session,
-        ref: UserTrackRefRow,
-        row: TrackMetadataRow,
-        *,
-        operation_id: UUID | None = None,
-        digest: bytes | None = None,
-    ) -> None:
-        if row.document.get("album_group_v1") is not None:
-            row.document = {**row.document, "album_group_v1": coherent_album_group(row.document)}
-            if (
-                row.document["album_group_v1"] is None
-                and (row.document.get("artwork_source") or {}).get("source") == "MUSICBRAINZ"
-            ):
-                row.artwork_sha256 = None
-                row.document = {**row.document, "artwork_source": None}
-        row.revision += 1
-        row.updated_at = datetime.now(UTC)
-        ref.row_version += 1
-        ref.updated_at = row.updated_at
-        view = metadata_view(row)
-        session.flush()
-        session.add(
-            TrackMetadataRevisionRow(
-                user_track_ref_id=ref.user_track_ref_id,
-                revision=row.revision,
-                snapshot=view,
-                operation_id=operation_id,
-                request_sha256=digest,
-            )
-        )
-        session.add(
-            SyncEventRow(
-                event_id=uuid5(NAMESPACE_URL, f"metadata:{ref.user_track_ref_id}:{row.revision}"),
-                user_id=ref.user_id,
-                origin_device_id=None,
-                event_type="USER_TRACK_REF_PATCHED",
-                schema_version=1,
-                aggregate_type="USER_TRACK_REF",
-                aggregate_id=ref.user_track_ref_id,
-                operation="UPSERT",
-                server_row_version=ref.row_version,
-                payload={
-                    "recording_id": str(ref.recording_id) if ref.recording_id else None,
-                    "title": ref.raw_title,
-                    "artist": ref.raw_artist,
-                    "album": ref.raw_album,
-                    "duration_ms": ref.raw_duration_ms,
-                    "resolution_status": ref.resolution_status,
-                    "metadata_v1": view,
-                },
-            )
-        )
+    _publish = staticmethod(publish_metadata_revision)
 
     def locked_job(
         self,
@@ -889,11 +895,13 @@ class TrackMetadataService:
         fields: MetadataFields | None = None,
         evidence: FieldEvidence | None = None,
         artwork: bytes | None = None,
+        public_images: tuple[ArtMatch, bytes | None, bytes | None] | None = None,
         state: str | None = None,
         candidates: list[dict[str, Any]] | None = None,
         error_code: str | None = None,
         explicit_selection: bool = False,
         audio_variant_id: UUID | None = None,
+        loudness: TrackLoudness | None = None,
         album_group: dict[str, object] | None = None,
         expected_acquisition_sha256: str | None = None,
         clear_album_group: bool = False,
@@ -912,7 +920,18 @@ class TrackMetadataService:
                     "worker_acquisition_sha256": expected_acquisition_sha256,
                 }
             if audio_variant_id is not None:
-                row.document = {**row.document, "audio_variant_id": str(audio_variant_id)}
+                document = dict(row.document)
+                if document.get("audio_variant_id") != str(audio_variant_id):
+                    document.pop("loudness_v1", None)
+                document["audio_variant_id"] = str(audio_variant_id)
+                if loudness is not None and evidence is not None:
+                    document["loudness_v1"] = {
+                        "audio_variant_id": str(audio_variant_id),
+                        "sha256": evidence.source_id.removeprefix("sha256:"),
+                        "gain_db": loudness.gain_db,
+                        "true_peak": loudness.true_peak,
+                    }
+                row.document = document
             native_changed = False
             if fields is not None and evidence is not None:
                 previous = document_from(row)
@@ -981,14 +1000,20 @@ class TrackMetadataService:
                         },
                         {k: v for k, v in previous.provenance.items() if v.source == "USER"},
                     )
-                # Edition replacement retains independently observed genres when
-                # the chosen release has no genre data of its own.
-                if explicit_selection and "genres" not in fields:
+                if explicit_selection:
                     old = document_from(row)
-                    if "genres" in old.fields:
+                    for tag in ("genres", "composer"):
+                        if tag in fields or tag not in old.fields:
+                            continue
+                        if tag == "composer" and old.provenance[tag].source not in {
+                            "USER",
+                            "EMBEDDED",
+                            "SOURCE_NATIVE",
+                        }:
+                            continue
                         previous = MetadataDocument(
-                            {**previous.fields, "genres": old.fields["genres"]},
-                            {**previous.provenance, "genres": old.provenance["genres"]},
+                            {**previous.fields, tag: old.fields[tag]},
+                            {**previous.provenance, tag: old.provenance[tag]},
                         )
                 doc = previous.merge(
                     fields,
@@ -998,6 +1023,19 @@ class TrackMetadataService:
                         and not explicit_selection
                     ),
                 )
+                if original_artwork_source(row.document.get("artwork_source")):
+                    prior = row.document.get("fields") or {}
+                    defaults = {
+                        "title": ref.raw_title,
+                        "artist": ref.raw_artist,
+                        "mb_recording_id": None,
+                    }
+                    if any(
+                        prior.get(key, default) != doc.fields.get(key, default)
+                        for key, default in defaults.items()
+                    ):
+                        row.artwork_sha256 = None
+                        row.document = {**row.document, "artwork_source": None}
                 row.document = {
                     **row.document,
                     "fields": doc.fields,
@@ -1072,12 +1110,19 @@ class TrackMetadataService:
                     .on_conflict_do_nothing()
                 )
                 # Embedded cover stays preferred over external art on background refresh.
+                previous_artwork = row.document.get("artwork_source") or {}
+                replace_fallback = previous_artwork.get(
+                    "source"
+                ) == "PUBLIC_CATALOG" and evidence.source in {"SOURCE_NATIVE", "MUSICBRAINZ"}
                 if row.artwork_sha256 is None or (
-                    evidence.source == "EMBEDDED"
-                    and not (row.document.get("artwork_source") or {}).get("locked")
+                    not previous_artwork.get("locked")
+                    and (evidence.source == "EMBEDDED" or replace_fallback)
                 ):
                     row.artwork_sha256 = sha
                     row.document = {**row.document, "artwork_source": asdict(evidence)}
+            if public_images:
+                match, cover_image, portrait_image = public_images
+                attach_images(session, row, match, cover_image, portrait_image)
             if candidates is not None:
                 row.candidates = candidates
             if state is not None:

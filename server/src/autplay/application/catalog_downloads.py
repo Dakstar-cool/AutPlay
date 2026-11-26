@@ -1,5 +1,6 @@
 """Resumable owner-scoped previews and selection of exact catalogue recording sources."""
 
+import re
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
@@ -9,20 +10,23 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from autplay.adapters.postgresql.catalogue_context import PostgresCatalogueContextRepository
-from autplay.adapters.postgresql.models import CatalogDownloadRow
+from autplay.adapters.postgresql.models import CatalogDownloadRow, UserTrackRefRow
 from autplay.adapters.postgresql.models.catalogue_context import (
     InternetCatalogueContextRow,
     InternetSearchContextRow,
 )
 from autplay.adapters.postgresql.models.internet_music import InternetAcquisitionRow
-from autplay.adapters.postgresql.vault_track_match import same_track
-from autplay.application.catalogue_context import CatalogueContextService
+from autplay.adapters.postgresql.vault_runtime import PostgresVaultRuntime
+from autplay.application.catalogue_context import CatalogueContextService, catalogue_track_ref
 from autplay.application.internet_music import InternetMusicService
 from autplay.application.music_discovery import MusicDiscoveryService
 from autplay.application.music_library import MusicError
 from autplay.application.sync import _acquire_sync_owner_publish_lock
+from autplay.application.vault_uploads import VaultNotFoundError
 from autplay.domain.auth import Principal
 from autplay.domain.catalogue_context import CatalogueContextEntity, CatalogueTrackCard
+from autplay.domain.music_discovery import song_version, source_title
+from autplay.domain.track_metadata import version_markers
 
 
 def _items(page: dict[str, object]) -> list[dict[str, Any]]:
@@ -30,6 +34,23 @@ def _items(page: dict[str, object]) -> list[dict[str, Any]]:
     if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
         raise MusicError("music_catalogue_unavailable", "Invalid catalogue page.", 503)
     return items
+
+
+_PERFORMANCE = re.compile(
+    r"\b(?:cover|кавер|лайв|концертная версия|концертное исполнение|с концерта)\b"  # noqa: RUF001
+    r"|\blive(?:$|[,;:]|\s+(?:at|in|from|version|performance|recording|session|on|acoustic|unplugged|\d{2,4})\b|\s+@)",
+    re.I,
+)
+_VERSION_NOTE = re.compile(r"[\[(]([^\])]+)[\])]|[ \t]+[-\u2013\u2014][ \t]+(.+)$")
+
+
+def _studio_recording(card: dict[str, Any]) -> bool:
+    if card.get("performance_types") or _PERFORMANCE.search(card.get("disambiguation") or ""):
+        return False
+    title = card.get("recording_title") or card["title"]
+    return not any(
+        _PERFORMANCE.search(match[1] or match[2]) for match in _VERSION_NOTE.finditer(title)
+    )
 
 
 class CatalogDownloads:
@@ -79,7 +100,7 @@ class CatalogDownloads:
                     "recordings": {},
                     "editions": {},
                     "pending_editions": [],
-                    "step": kind,
+                    "step": "studio_recordings" if kind == "artist" else kind,
                     "poll": 0,
                 }
                 row = CatalogDownloadRow(
@@ -123,20 +144,99 @@ class CatalogDownloads:
                 row.document, row.updated_at = state, datetime.now(UTC)
             return self._view(row)
 
+    def device_files(self, actor: Principal, operation: UUID, offset: int) -> dict[str, Any]:
+        """Resolve a stable page of the completed selection for download on this device."""
+        with self.sessions.begin() as session:
+            _acquire_sync_owner_publish_lock(session, actor.user_id)
+            row = session.get(CatalogDownloadRow, operation)
+            if row is None or row.user_id != actor.user_id:
+                raise MusicError("catalog_download_missing", "The download is unavailable.", 404)
+            if row.document["phase"] != "complete":
+                raise MusicError("catalog_download_incomplete", "Wait for the download.", 409)
+            ready = sorted(
+                (key, item)
+                for key, item in row.document["recordings"].items()
+                if item["state"] == "vault"
+            )
+            page = ready[offset : offset + 50]
+            files = []
+            unavailable = []
+            vault = PostgresVaultRuntime(session)
+            for mbid, item in page:
+                if item.get("acquisition"):
+                    source = session.get(InternetAcquisitionRow, UUID(item["acquisition"]))
+                    ref = (
+                        session.get(UserTrackRefRow, source.user_track_ref_id)
+                        if source
+                        and source.user_id == actor.user_id
+                        and source.user_track_ref_id
+                        and source.state == "READY"
+                        else None
+                    )
+                else:
+                    card = CatalogueTrackCard(
+                        CatalogueContextEntity.RECORDING,
+                        UUID(mbid),
+                        UUID(mbid),
+                        item["title"],
+                        item["artist"],
+                        duration_ms=item["duration_ms"],
+                    )
+                    ref = catalogue_track_ref(session, actor.user_id, card)
+                if ref is None or ref.user_id != actor.user_id or ref.deleted_at is not None:
+                    unavailable.append(item["title"])
+                    continue
+                try:
+                    variant = vault.resolve_owner_playback_variant(
+                        actor.user_id, ref.user_track_ref_id, include_catalog=True
+                    )
+                except VaultNotFoundError:
+                    unavailable.append(item["title"])
+                    continue
+                files.append(
+                    {
+                        "user_track_ref_id": str(ref.user_track_ref_id),
+                        "audio_variant_id": str(variant),
+                        "row_version": ref.row_version,
+                        "recording_id": str(ref.recording_id) if ref.recording_id else None,
+                        "resolution_status": ref.resolution_status,
+                        "title": ref.raw_title or item["title"],
+                        "artist": ref.raw_artist,
+                        "album": ref.raw_album,
+                        "duration_ms": ref.raw_duration_ms,
+                    }
+                )
+            end = offset + len(page)
+            return {
+                "files": files,
+                "unavailable": unavailable,
+                "next_offset": end if end < len(ready) else None,
+            }
+
     @staticmethod
-    def _add(state: dict[str, Any], card: dict[str, Any]) -> None:
+    def _add(state: dict[str, Any], card: dict[str, Any], *, official: bool = False) -> None:
         mbid = card.get("recording_id")
         if mbid:
-            state["recordings"].setdefault(
+            versioned = source_title(
+                card["title"], card.get("recording_title"), card.get("disambiguation")
+            )
+            item = state["recordings"].setdefault(
                 mbid,
                 {
                     "title": card.get("recording_title") or card["title"],
                     "artist": card.get("artist"),
                     "duration_ms": card.get("duration_ms"),
                     "query": card.get("download_search_query"),
+                    "source_title": versioned,
                     "state": "pending",
                 },
             )
+            if state["scope"]["kind"] == "artist":
+                variant = song_version(versioned or card["title"])[1] or version_markers(
+                    card.get("disambiguation") or ""
+                )
+                priority = 2 * bool(variant) + int(not official)
+                item["priority"] = min(priority, item.get("priority", priority))
 
     def _discover(self, actor: Principal, state: dict[str, Any]) -> None:
         scope, step, offset = state["scope"], state["step"], state["offset"]
@@ -146,19 +246,37 @@ class CatalogDownloads:
             card = result["lookup_metadata"]
             if not isinstance(card, dict):
                 raise MusicError("music_catalogue_unavailable", "Invalid catalogue receipt.", 503)
+            title = source_title(
+                card["title"], card.get("recording_title"), card.get("disambiguation")
+            )
             self._add(
                 state,
                 {
                     **card,
                     "recording_id": str(target),
-                    "download_search_query": (str(card["artist"]) + " " + str(card["title"]))[:200]
-                    if card["artist"]
+                    "download_search_query": (str(card["artist"]) + " " + title)[:200]
+                    if card["artist"] and title
                     else None,
                 },
             )
             state["phase"] = "inspect"
             return
-        if step == "artist":
+        if step == "studio_recordings":
+            page = self.discovery.artist_tracks(actor, target, limit=50, offset=offset)
+            cards = [
+                card
+                for card in _items(page)
+                if _studio_recording(card) and card.get("recording_id")
+            ]
+            official = self.discovery.official_recordings(
+                actor, [UUID(card["recording_id"]) for card in cards]
+            )
+            for card in cards:
+                self._add(state, card, official=card["recording_id"] in official)
+            if page["next_offset"] is None:
+                state["phase"] = "inspect"
+        elif step == "artist":
+            # Resume previews created before the studio-discography scope was introduced.
             page = self.discovery.artist_releases(actor, target, limit=50, offset=offset)
             for card in _items(page):
                 group = (
@@ -208,27 +326,35 @@ class CatalogDownloads:
         if not pending:
             state["phase"] = "preview"
             return
-        mbid, item = min(pending)
+        mbid, item = min(pending, key=lambda entry: (entry[1].get("priority", 1), entry[0]))
         cache = self.discovery.page_cache
         if cache and mbid in cache.available_recordings(actor.user_id, [mbid]):
             item["state"] = "vault"
             return
-        if not item["query"] or not item["duration_ms"]:
+        expected = item.get("source_title", item["title"])
+        if (
+            not expected
+            or len(expected) > 500
+            or not item["artist"]
+            or not item["query"]
+            or not item["duration_ms"]
+        ):
             item.update(state="missing", reason="catalogue_match_evidence_missing")
             return
         attempt = item.get("attempt", 0)
         search_id = uuid5(operation, f"search:{mbid}:{attempt}")
         context_id = uuid5(operation, f"context:{mbid}:{attempt}")
+        card = CatalogueTrackCard(
+            CatalogueContextEntity.RECORDING,
+            UUID(mbid),
+            UUID(mbid),
+            expected,
+            item["artist"],
+            duration_ms=item["duration_ms"],
+            recording_title=item["title"] if item["title"] != expected else None,
+        )
         with self.sessions.begin() as session:
             if session.get(InternetCatalogueContextRow, context_id) is None:
-                card = CatalogueTrackCard(
-                    CatalogueContextEntity.RECORDING,
-                    UUID(mbid),
-                    UUID(mbid),
-                    item["title"],
-                    item["artist"],
-                    duration_ms=item["duration_ms"],
-                )
                 PostgresCatalogueContextRepository(session).create(
                     actor.user_id, context_id, card, datetime.now(UTC)
                 )
@@ -242,7 +368,16 @@ class CatalogDownloads:
                 raise
             item.update(state="failed", reason=exc.code)
             return
-        candidate = next((c for c in result["candidates"] if same_track(c, item)), None)
+        candidate = next(
+            (
+                c
+                for c in result["candidates"]
+                if card.corroborates(
+                    title=c["title"], artist=c["artist"], measured_duration_ms=c["duration_ms"]
+                )
+            ),
+            None,
+        )
         if candidate is None:
             item.update(state="missing", reason="source_not_found")
             return
@@ -283,9 +418,10 @@ class CatalogDownloads:
         if any(item["state"] == "pending" for item in items):
             self._inspect(actor, operation, state)
             return
-        available = next(
+        available = min(
             ((key, it) for key, it in state["recordings"].items() if it["state"] == "available"),
-            None,
+            key=lambda entry: entry[1].get("priority", 1),
+            default=None,
         )
         if available is not None:
             source_mbid, item = available

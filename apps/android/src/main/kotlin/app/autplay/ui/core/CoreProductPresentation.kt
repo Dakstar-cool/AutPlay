@@ -39,12 +39,13 @@ internal fun buildLibraryTrackSummaries(
             addedAtMs = entry.addedAtMs,
             sourceOrder = index,
             loved = entry.loved,
+            onDevice = entry.onDevice,
             canRemove = entry.localLibraryEntryId != null || entry.loved,
             downloaded = downloaded,
             availability = resolveTrackAvailability(
                 entry.availabilityStatus,
                 audio,
-                downloaded,
+                downloaded || entry.onDevice,
                 serverConnected && entry.serverPlaybackCandidate,
             ),
         )
@@ -54,10 +55,10 @@ internal fun buildLibraryTrackSummaries(
 private fun resolveTrackAvailability(
     libraryAvailability: String,
     audioStates: List<CoreLocalAudioSummary>,
-    downloaded: Boolean,
+    hasLocalSource: Boolean,
     serverPlaybackCandidate: Boolean,
 ): TrackAvailability = when {
-    downloaded || serverPlaybackCandidate || libraryAvailability == "LOCAL" ||
+    hasLocalSource || serverPlaybackCandidate || libraryAvailability == "LOCAL" ||
         audioStates.any { it.status == "AVAILABLE" && it.hasReadAccess } -> TrackAvailability.Available
     audioStates.any { it.status == "PERMISSION_REVOKED" || !it.hasReadAccess } ->
         TrackAvailability.PermissionRevoked
@@ -90,7 +91,6 @@ internal fun buildHomeScreenUiState(
     continueListening: CoreResumeQueueSummary?,
     recentlyPlayed: List<CoreHomeTrackSummary>,
     recentlyAdded: List<CoreHomeTrackSummary>,
-    playlists: List<CoreHomePlaylistSummary>,
     libraryTracks: List<CoreTrackSummary>,
     problems: List<HomeProblemUiItem>,
     recommendationError: Boolean,
@@ -109,7 +109,7 @@ internal fun buildHomeScreenUiState(
     offlineFallback = offlineFallback,
     releases = releases.map {
         HomeReleaseUiItem(it.stableId, it.title, it.artistName ?: unknownArtist, it.releaseDateText,
-            artworkTrackId = it.artworkTrackId, inLibrary = (it.ownedTrackCount ?: 0) > 0)
+            releaseMbid = it.mbid, artworkTrackId = it.artworkTrackId, inLibrary = (it.ownedTrackCount ?: 0) > 0)
     },
     recommendations = recommendations,
     continueListening = continueListening?.takeIf { it.localUserTrackRefId in playableTrackIds }?.let { queue ->
@@ -124,7 +124,6 @@ internal fun buildHomeScreenUiState(
         .map { HomeTrackUiItem(it.stableId, it.title ?: untitledTrack, it.artistName) },
     recentlyAdded = recentlyAdded.filter { it.stableId in playableTrackIds }
         .map { HomeTrackUiItem(it.stableId, it.title ?: untitledTrack, it.artistName) },
-    playlists = playlists.map { CoreCollectionUiItem(it.stableId, it.title, it.description) },
     offlineReady = libraryTracks.filter(CoreTrackSummary::downloaded).take(8)
         .map { HomeTrackUiItem(it.stableId, it.title, it.artist) },
     problems = problems,
@@ -171,13 +170,15 @@ internal fun buildLibraryScreenUiState(
             CoreArtistUiItem(
                 id = artist.key.artistId.value,
                 name = artist.name,
+                portraitTrackIds = artist.portraitTrackIds,
+                portraitArtistIds = artist.portraitArtistIds,
                 subtitle = listOfNotNull(artist.disambiguation, artist.countryCode)
                     .filter(String::isNotBlank).joinToString(" · ").ifBlank { null },
             )
         },
         artistBrowseState = artistBrowseState,
         playlists = playlists.map { CoreCollectionUiItem(it.stableId, it.title, it.description, artworkTrackId = it.artworkTrackId) },
-        albums = releases.map { CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount, it.artworkTrackId) },
+        albums = releases.map { CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount, it.artworkTrackId, it.mbid, it.releaseDateText) },
         reviewCount = reviewCount,
         importingLocalTrack = importingLocalTrack,
         lastImportedTitle = lastImportedTitle,

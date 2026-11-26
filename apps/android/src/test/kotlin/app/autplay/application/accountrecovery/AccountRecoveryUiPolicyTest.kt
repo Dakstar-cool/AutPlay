@@ -9,12 +9,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AccountRecoveryUiPolicyTest {
-    @Test fun offlineExportAndManualEntryKeepWindowSecure() {
+    @Test fun ordinaryRecoverySettingsCanBeCapturedAndActiveRecoveryStaysSecure() {
         for (state in listOf(
             AccountRecoveryUiState(canRecover = true),
             AccountRecoveryUiState(source = AccountRecoverySourceState.Ready(true, true, 2)),
-            AccountRecoveryUiState(recipient = AccountRecoveryRecipientState.Blocked("unavailable", true, true)),
-        )) assertTrue(requiresSecureProfileWindow(ProfilePairingUiState(pairing = PairingState.NotConnected, accountRecovery = state)))
+        )) assertFalse(requiresSecureProfileWindow(ProfilePairingUiState(pairing = PairingState.NotConnected, accountRecovery = state)))
+        val active = AccountRecoveryUiState(recipient = AccountRecoveryRecipientState.Blocked("unavailable", true, true))
+        assertTrue(requiresSecureProfileWindow(ProfilePairingUiState(pairing = PairingState.NotConnected, accountRecovery = active)))
     }
 
     @Test fun pendingAndFailedCeremoniesBlockCompetingFirstBindUntilDismissed() {

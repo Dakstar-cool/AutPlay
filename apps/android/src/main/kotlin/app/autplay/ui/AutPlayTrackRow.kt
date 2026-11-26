@@ -27,9 +27,15 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontWeight
+import app.autplay.ui.core.DetailTarget
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.autplay.application.artist.musicDisplayCredit
+import app.autplay.application.artist.musicDisplayTitle
 import app.autplay.R
 
 @Composable
@@ -43,6 +49,7 @@ internal fun AutPlayTrackRow(
     selected: Boolean = false,
     detail: String? = null,
     emphasizeDetail: Boolean = false,
+    artistLinks: (@Composable () -> Unit)? = null,
     actions: (@Composable () -> Unit)? = null,
 ) {
     Surface(
@@ -62,10 +69,10 @@ internal fun AutPlayTrackRow(
         ) {
             AutPlayArtwork(title, Modifier.clearAndSetSemantics {}, size = 48.dp, trackId = trackId)
             Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                Text(musicDisplayTitle(title), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     fontWeight = if (selected) FontWeight.Bold else null,
                     color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                Text(artist ?: stringResource(R.string.library_unknown_artist), style = MaterialTheme.typography.bodyMedium,
+                if (artistLinks != null) artistLinks() else Text(artist?.let(::musicDisplayCredit) ?: stringResource(R.string.library_unknown_artist), style = MaterialTheme.typography.bodyMedium,
                     color = AutPlayTokens.colors.mutedText, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (!detail.isNullOrBlank()) {
                     Text(
@@ -83,6 +90,18 @@ internal fun AutPlayTrackRow(
             }
         }
     }
+}
+
+@Composable
+internal fun ArtistCreditLine(artists: List<Pair<String, DetailTarget>>, onOpen: (DetailTarget) -> Unit) {
+    val credit = buildAnnotatedString {
+        artists.forEachIndexed { index, (name, target) ->
+            if (index > 0) append(", ")
+            withLink(LinkAnnotation.Clickable(target.stableId) { onOpen(target) }) { append(musicDisplayCredit(name)) }
+        }
+    }
+    Text(credit, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary,
+        maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 @Composable

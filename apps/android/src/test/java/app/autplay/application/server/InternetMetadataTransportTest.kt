@@ -1,5 +1,6 @@
 package app.autplay.application.server
 
+import app.autplay.decodeArtistOverview
 import app.autplay.application.search.LibrarySearchKind
 import app.autplay.data.security.CredentialStore
 import app.autplay.data.security.SessionCredentialEnvelope
@@ -62,6 +63,46 @@ class InternetMetadataTransportTest {
             assertEquals(RELEASE, albums.items.single().browseTarget?.entityId)
             assertFalse(albums.directAcquisitionAllowed)
             assertEquals(2, server.requestCount)
+        }
+    }
+
+    @Test
+    fun busyArtistSearchRetriesTheSameReadAndReturnsItsResult() = runBlocking {
+        withRepository { server, repository ->
+            server.enqueue(errorResponse(503, "music_discovery_busy", true))
+            server.enqueue(success(page(ARTIST_PAGE, limit = 25, offset = 0)))
+            val result = repository.discoverMusic("Apashe", InternetMetadataDiscoveryKind.ARTIST)
+            assertEquals(ARTIST, result.items.single().browseTarget?.entityId)
+            assertEquals(take(server).path, take(server).path)
+        }
+    }
+
+    @Test
+    fun returningToAnArtistRequestsOnlyTheReleaseUpdateForItsSavedBaseline() = runBlocking {
+        withRepository { server, repository ->
+            val full = buildJsonObject {
+                put("contract_version", "artist-overview-v1")
+                put("artist_mbid", ARTIST)
+                put("baseline_id", OPERATION)
+                put("tracks", Json.parseToJsonElement(RECORDINGS_PAGE))
+                put("releases", Json.parseToJsonElement(ALBUM_PAGE))
+                put("latest", Json.parseToJsonElement(ALBUM_PAGE))
+                put("latest_complete", true)
+                put("refreshing", false)
+            }
+            server.enqueue(success(full.toString()))
+            val saved = decodeArtistOverview(ARTIST, repository.artistOverview(ARTIST, null))
+            assertGet(take(server), "/api/v1/music/discovery/artists/$ARTIST/overview")
+
+            val changes = JsonObject((full - "tracks" - "releases") + ("latest" to
+                Json.parseToJsonElement(ALBUM_PAGE.replace(RELEASE, OTHER_RELEASE))))
+            server.enqueue(success(changes.toString()))
+            val patch = repository.artistOverview(ARTIST, saved.baselineId)
+            assertQuery(take(server), mapOf("baseline" to OPERATION))
+            val merged = decodeArtistOverview(ARTIST, patch, saved)
+            assertTrue(merged.tracks === saved.tracks && merged.releases === saved.releases)
+            assertEquals(OTHER_RELEASE, merged.latest.items.single().releaseId)
+            assertTrue(runCatching { decodeArtistOverview(ARTIST, patch, saved.copy(baselineId = OTHER_OPERATION)) }.isFailure)
         }
     }
 

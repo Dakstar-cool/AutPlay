@@ -10,8 +10,11 @@ internal fun MediaItem?.isResolvedPlaybackSource(): Boolean {
     return isResolvedPlaybackSource(
         scheme = item.localConfiguration?.uri?.scheme,
         unavailableReason = item.mediaMetadata.extras?.getString("unavailable_reason"),
+        selectedSource = item.mediaMetadata.extras?.getString("selected_source"),
     )
 }
 
-internal fun isResolvedPlaybackSource(scheme: String?, unavailableReason: String?): Boolean =
-    unavailableReason == null && scheme != null && scheme !in NON_PLAYABLE_SCHEMES
+// A MediaController can receive metadata without the service's LocalConfiguration.
+internal fun isResolvedPlaybackSource(scheme: String?, unavailableReason: String?, selectedSource: String? = null): Boolean =
+    unavailableReason == null && scheme !in NON_PLAYABLE_SCHEMES &&
+        (scheme != null || SelectedAudioSource.entries.any { it.name == selectedSource })

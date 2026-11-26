@@ -1,5 +1,7 @@
 package app.autplay.application.library
 
+import app.autplay.application.artist.TrackNames
+import app.autplay.application.artist.trackNames
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.TrackMetadataEntity
 import kotlinx.serialization.json.*
@@ -32,6 +34,25 @@ data class TrackMetadata(val revision: Long, val state: String, val fields: Json
 
 internal fun TrackMetadataEntity.decoded(): TrackMetadata = TrackMetadata.decode(Json.parseToJsonElement(payloadJson).jsonObject)
 
+private fun JsonObject?.isSourceLabel(): Boolean =
+    this?.get("source")?.jsonPrimitive?.contentOrNull in setOf("EMBEDDED", "SOURCE_NATIVE", "FILENAME", "SOURCE_LABEL") &&
+        this?.get("locked")?.jsonPrimitive?.booleanOrNull != true &&
+        this?.get("normalization_version")?.jsonPrimitive?.contentOrNull != "display-v9"
+
+internal fun TrackMetadata?.allowsRawArtistAlias(): Boolean {
+    val proof = this?.provenance?.get("artist") as? JsonObject
+    return proof?.get("locked")?.jsonPrimitive?.booleanOrNull != true &&
+        proof?.get("source")?.jsonPrimitive?.contentOrNull != "USER"
+}
+
+internal fun TrackMetadata?.names(rawTitle: String?, rawArtist: String?): TrackNames {
+    val hasTitle = this?.fields?.containsKey("title") == true
+    val hasArtist = this?.fields?.containsKey("artist") == true
+    return trackNames(rawTitle, if (hasArtist) this?.text("artist") else rawArtist,
+        this?.text("title"), hasTitle, hasArtist, (this?.provenance?.get("title") as? JsonObject).isSourceLabel(),
+        (this?.provenance?.get("artist") as? JsonObject).isSourceLabel())
+}
+
 /** The caller owns the Room transaction, including the FTS refresh. */
 internal suspend fun AutPlayDatabase.projectMetadata(profile: String, track: String, root: JsonObject): Boolean {
     val parsed = runCatching { TrackMetadata.decode(root) }.getOrNull() ?: return false
@@ -52,15 +73,44 @@ internal suspend fun AutPlayDatabase.projectMetadata(profile: String, track: Str
         val evidence = value as? JsonObject
         evidence?.get("source")?.jsonPrimitive?.contentOrNull == "MUSICBRAINZ" && evidence["locked"]?.jsonPrimitive?.booleanOrNull == true
     }
-    val serverFields = server.fields.filterKeys { key -> (server.provenance[key] as? JsonObject)?.get("source_id")?.jsonPrimitive?.contentOrNull != "local-file" }
-    val fields = JsonObject((if (selectedEdition) emptyMap() else localFields) + serverFields)
-    val provenance = JsonObject((if (selectedEdition) emptyMap() else localSources.filterKeys { it !in serverFields }) + server.provenance.filterKeys { it in serverFields })
+    val serverFields = server.fields.filterKeys { key ->
+        (server.provenance[key] as? JsonObject)?.get("source_id")?.jsonPrimitive?.contentOrNull != "local-file"
+    }.toMutableMap()
+    val serverProofs = server.provenance.filterKeys { it in serverFields }.toMutableMap()
+    if (parsed.state == "LOCAL" && server !== parsed) {
+        (server.payload["server_name_fields"] as? JsonObject)?.let(serverFields::putAll)
+        (server.payload["server_name_provenance"] as? JsonObject)?.let(serverProofs::putAll)
+    }
+    val nameKeys = setOf("title", "artist")
+    val chosenLocal = localFields.filterKeys { key ->
+        if (key !in nameKeys) return@filterKeys key !in serverFields && (!selectedEdition || key == "composer")
+        val proof = serverProofs[key] as? JsonObject
+        key !in serverFields || (serverFields[key] != JsonNull &&
+            proof?.get("source")?.jsonPrimitive?.contentOrNull in setOf("FILENAME", "SOURCE_LABEL", "SOURCE_NATIVE") &&
+            proof?.get("locked")?.jsonPrimitive?.booleanOrNull != true)
+    }
+    val provenance = JsonObject(serverProofs + localSources.filterKeys { it in chosenLocal })
+    val selected = serverFields + chosenLocal
+    val effectiveArtist = if (selected.containsKey("artist")) (selected["artist"] as? JsonPrimitive)?.contentOrNull else ref.rawArtist
+    val cleanTitle = (provenance["title"] as? JsonObject).isSourceLabel()
+    val cleanArtist = (provenance["artist"] as? JsonObject).isSourceLabel()
+    val names = trackNames(ref.rawTitle, effectiveArtist, (selected["title"] as? JsonPrimitive)?.contentOrNull,
+        "title" in selected, "artist" in selected, cleanTitle, cleanArtist)
+    val fields = JsonObject(selected.toMutableMap().apply {
+        if (cleanTitle && selected["title"] != JsonNull) put("title", JsonPrimitive(names.title))
+        if ((cleanArtist && selected["artist"] != JsonNull) ||
+            ("artist" !in selected && cleanTitle && names.artist != effectiveArtist)) put("artist", JsonPrimitive(names.artist))
+    })
     val localArt = if (parsed.state == "LOCAL") parsed.payload["artwork_sha256"] else prior?.payload?.get("local_artwork_sha256")
         ?: if (prior?.state == "LOCAL") prior.payload["artwork_sha256"] else null
     val priorLocalArt = (prior?.payload?.get("local_artwork_sha256") as? JsonPrimitive)?.contentOrNull
     val serverArt = server.artworkSha256?.takeUnless { parsed.state == "LOCAL" && (server.state == "LOCAL" || it == priorLocalArt) }
-    val art = serverArt ?: if (selectedEdition) null else (localArt as? JsonPrimitive)?.contentOrNull
+    val localSha = (localArt as? JsonPrimitive)?.contentOrNull.takeUnless { selectedEdition }
+    val catalogFallback = ((server.payload["artwork_source"] as? JsonObject)?.get("source") as? JsonPrimitive)?.contentOrNull == "PUBLIC_CATALOG"
+    val art = if (catalogFallback) localSha ?: serverArt else serverArt ?: localSha
     val effective = JsonObject(server.payload + mapOf("fields" to fields, "provenance" to provenance,
+        "server_name_fields" to JsonObject(serverFields.filterKeys { it in nameKeys }),
+        "server_name_provenance" to JsonObject(serverProofs.filterKeys { it in nameKeys }),
         "local_fields" to localFields, "local_provenance" to localSources,
         "local_reader_version" to (if (parsed.state == "LOCAL") parsed.payload["local_reader_version"] ?: JsonNull else prior?.payload?.get("local_reader_version") ?: JsonNull),
         "artwork_sha256" to (art?.let(::JsonPrimitive) ?: JsonNull)) +

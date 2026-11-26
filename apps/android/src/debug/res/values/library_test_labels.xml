@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_wheel_preview">Mix preview</string>
+    <string name="action_open_settings">Open settings</string>
+    <string name="home_context_collections">Made for the moment</string>
+    <string name="home_recently_added">Recently added</string>
+    <string name="home_playlists">Playlists</string>
+    <string name="home_offline_ready">Offline ready</string>
+    <string name="search_local_scope">Local</string>
+    <string name="search_vault_scope">Vault</string>
+    <string name="search_vault_empty">No matching items in the personal Vault.</string>
+    <string name="library_filter_unavailable">Unavailable</string>
+    <string name="expanded_queue_title">Up next</string>
+    <plurals name="statistics_window_days">
+        <item quantity="one">Last %1$d day</item>
+        <item quantity="other">Last %1$d days</item>
+    </plurals>
+</resources>

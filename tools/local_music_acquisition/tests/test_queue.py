@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import shutil
 import threading
 import time
-import wave
 from pathlib import Path
 
 import pytest
@@ -16,19 +14,6 @@ from local_music_acquisition.models import AcquiredArtifact, ProviderFailure, Pr
 from local_music_acquisition.orchestrator import DownloadSession, PlaylistDownloadError
 from local_music_acquisition.queue_cli import main as queue_main
 from local_music_acquisition.queue_store import exclusive_lock, read_json, write_json
-
-
-@pytest.fixture
-def audio() -> bytes:
-    if shutil.which("ffmpeg") is None:
-        pytest.fail("ffmpeg is required for real queue audio validation")
-    output = io.BytesIO()
-    with wave.open(output, "wb") as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(8000)
-        handle.writeframes(b"\0\0" * 96000)
-    return output.getvalue()
 
 
 class Provider:

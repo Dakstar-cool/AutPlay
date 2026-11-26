@@ -12,7 +12,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
-internal data class InternetMusicWorkStatus(val states: List<WorkInfo.State> = emptyList(), val downloadState: String? = null, val localTrackId: String? = null)
+internal data class InternetMusicWorkStatus(val states: List<WorkInfo.State> = emptyList(), val downloadState: String? = null,
+    val localTrackId: String? = null, val transferId: String? = null)
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal fun observeInternetMusicWork(context: Context, profileId: String, searchId: String, candidateId: String): Flow<InternetMusicWorkStatus> =
@@ -23,7 +24,9 @@ internal fun observeInternetMusicWork(context: Context, profileId: String, searc
         }
         val ids = infos.mapNotNull { it.outputData.getString("download_intent") }.distinct()
         if (ids.isEmpty()) flowOf(InternetMusicWorkStatus(states, localTrackId = localTrackId))
-        else AutPlayRuntime.database(context).localAudioDao().observeDownloadState(profileId, ids).map { InternetMusicWorkStatus(states, it, localTrackId) }
+        else AutPlayRuntime.database(context).localAudioDao().observeLatestDownloadIntent(profileId, ids).map { intent ->
+            InternetMusicWorkStatus(states, intent?.state, localTrackId, intent?.media3DownloadId ?: intent?.downloadIntentId)
+        }
     }
 
 /** Optional presentation dependency; the normal app resolves the active binding through its runtime. */

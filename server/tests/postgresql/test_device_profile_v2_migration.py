@@ -181,7 +181,7 @@ def test_downgrade_refuses_either_table_before_any_schema_removal(
         database_harness.downgrade(database_name, "0068_device_capability_revision")
     assert snapshot_schema(database_connection) == before
     assert database_connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-        "0078_playlist_snapshots",
+        "0081_artist_onboarding",
     )
 
 

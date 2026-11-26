@@ -114,6 +114,24 @@ class PlaybackAudioSinkTest {
         } finally { sink.reset(); sink.release() }
     }
 
+    @Test fun measuredGainFollowsExactSourceAndEmbeddedTagsTakePriority() {
+        val variant = "aaa"
+        val source = ResolvedPlaybackSource(app.autplay.domain.LocalId.random(),
+            android.net.Uri.parse("autplay-vault://profile/audio-variants/$variant"), SelectedAudioSource.VAULT_STREAM)
+        val document = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"loudness_v1":{"audio_variant_id":"aaa","sha256":"abc","gain_db":4.25,"true_peak":0.12}}"""
+        ) as kotlinx.serialization.json.JsonObject
+        val measured = requireNotNull(serverLoudness(document, source, "profile"))
+        assertNull(serverLoudness(document, source, "other"))
+        assertNull(serverLoudness(document, source.copy(runtimeUri = android.net.Uri.parse("autplay-vault://profile/audio-variants/bbb")), "profile"))
+        assertEquals(measured, serverLoudness(document, source.copy(source = SelectedAudioSource.LOCAL_URI, localSha256 = "abc"), "profile"))
+        assertNull(serverLoudness(document, source.copy(source = SelectedAudioSource.LOCAL_URI, localSha256 = "def"), "profile"))
+        val untagged = format(tagged = false).buildUpon().setCustomData(measured).build()
+        assertEquals(4.25, playbackGain(untagged).trackGainDb!!, 0.0)
+        assertEquals(.12, playbackGain(untagged).trackPeak!!, 0.0)
+        assertEquals(-6.020599913, playbackGain(format(true).buildUpon().setCustomData(measured).build()).trackGainDb!!, 0.0)
+    }
+
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private fun createSink(preferences: PlaybackAudioPreferences, recording: RecordingAudioOutputProvider): PlaybackAudioSink {
         val sink = PlaybackAudioSink.create(context, preferences, recording)

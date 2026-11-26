@@ -315,7 +315,12 @@ def identity_track_from_row(row: ParsedImportRow) -> IdentityTrack:
 
     if not row.valid:
         raise ValueError("malformed import row cannot become an identity query")
-    markers = extract_version_markers(" ".join(filter(None, (row.title, row.album))))
+    markers = extract_version_markers(
+        " ".join(filter(None, (row.title, row.album, _scalar_text(row.raw_fields.get("version")))))
+    )
+    explicit = row.raw_fields.get("explicit")
+    if isinstance(explicit, bool):
+        markers += ("EXPLICIT" if explicit else "CLEAN",)
     identifiers: dict[str, str] = {}
     provider = _scalar_text(row.raw_fields.get("provider_key") or row.raw_fields.get("provider"))
     if row.external_id and provider:
@@ -692,8 +697,10 @@ def _parse_txt(text: str) -> list[ParsedImportRow]:
         if len(tab_fields) in {2, 3}:
             artist, title = tab_fields[:2]
             album = tab_fields[2] if len(tab_fields) == 3 else ""
-        elif " - " in line:
-            artist, title = (value.strip() for value in line.split(" - ", 1))
+        elif re.search(r"\s[-\u2013—]\s", line):
+            artist, title = (
+                value.strip() for value in re.split(r"\s[-\u2013—]\s", line, maxsplit=1)
+            )
             album = ""
         else:
             rows.append(
@@ -1040,6 +1047,12 @@ def _version_conflicts(query: set[str], candidate: set[str]) -> list[str]:
         conflicts.append("VERSION_CHANNEL_MIX")
     if ("REMASTER" in query) != ("REMASTER" in candidate):
         conflicts.append("VERSION_REMASTER_REVIEW")
+    if query & {"EXPLICIT", "CLEAN"} and not query.intersection(candidate, {"EXPLICIT", "CLEAN"}):
+        conflicts.append(
+            "VERSION_EXPLICIT_UNKNOWN"
+            if not candidate & {"EXPLICIT", "CLEAN"}
+            else "VERSION_EXPLICIT"
+        )
     return conflicts
 
 

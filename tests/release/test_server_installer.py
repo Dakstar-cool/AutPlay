@@ -221,6 +221,9 @@ def test_release_packager_emits_both_apks_and_the_server_installer() -> None:
     assert "server-installer-manifest.json" in packager
     assert "installer.zip" in packager
     assert "compose.public-edge.yaml" in packager
+    assert "compose.discogs.yaml" in packager
+    installer_copy_loop = packager.split("foreach ($composeInput in @(", 1)[1]
+    assert "$composeDiscogs," in installer_copy_loop.split("))", 1)[0]
     assert "Caddyfile.public-edge" in packager
     assert "RELEASE_NOTES_$releaseVersion.md" in packager
     assert "version_code = $androidVersionCode" in packager

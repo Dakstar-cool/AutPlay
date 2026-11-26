@@ -1,0 +1,32 @@
+<resources>
+    <string name="ext_import">Import by link</string>
+    <string name="ext_favorites">Transfer favorites</string>
+    <string name="ext_new_copy">Create another copy</string>
+    <string name="ext_link">Album, playlist or favorites link</string>
+    <string name="ext_recent">Recent imports</string>
+    <string name="ext_album">Album</string>
+    <string name="ext_playlist">Personal playlist</string>
+    <string name="ext_counts">Read %1$d of %2$s · Identified %3$d · Playable %4$d</string>
+    <string name="ext_sets">Liked sets: %1$d of %2$s</string>
+    <string name="ext_marks">Source likes: %1$d</string>
+    <string name="ext_partial">The source returned an incomplete collection.</string>
+    <string name="ext_session">SoundCloud preview is available for this session.</string>
+    <string name="ext_connect">Connect Spotify</string>
+    <string name="ext_saved">Saved to your account</string>
+    <string name="ext_unknown">Unavailable track</string>
+    <string name="ext_failed">Could not complete the import. Check the link, connection and source access.</string>
+    <string name="ext_save">Save</string>
+    <string name="ext_continue">Continue</string>
+    <string name="ext_close">Close</string>
+    <string name="ext_catalog_selection">Save from catalog (%1$d)</string>
+    <string name="ext_not_configured">This service is not configured on your AutPlay server.</string>
+    <string name="ext_choose_favorites">Choose Transfer favorites to import liked tracks.</string>
+    <string name="ext_access">Check access to this collection in the source account.</string>
+    <string name="ext_rate">The source has limited requests. Try again later.</string>
+    <string name="ext_no_album">This edition has not been identified in the AutPlay catalog.</string>
+    <string name="ext_missing">Missing from the source: %1$d. Kept in your library.</string>
+    <string name="ext_cancelled">Import cancelled</string>
+    <string name="ext_previous">Previous</string>
+    <string name="ext_more">More tracks</string>
+    <string name="ext_cancel">Cancel import</string>
+</resources>

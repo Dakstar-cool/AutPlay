@@ -48,7 +48,7 @@ internal class PlaybackAudioSink private constructor(
 
     override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
         super.configure(inputFormat, specifiedBufferSize, outputChannels)
-        processor.stageMetadata(replayGainTags(inputFormat.metadata))
+        processor.stageMetadata(playbackGain(inputFormat))
     }
 
     override fun flush() {

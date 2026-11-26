@@ -13,7 +13,6 @@ import app.autplay.application.sync.OkHttpSyncTransport
 import app.autplay.application.sync.SyncCoordinator
 import app.autplay.application.wave.OkHttpWaveTransport
 import app.autplay.application.wave.WaveCoordinator
-import app.autplay.domain.wave.WavePrefetchMode
 import app.autplay.playback.ServicePlaybackSessionOwner
 import app.autplay.playback.AndroidWaveSourceProbe
 import app.autplay.playback.Media3WavePrefetchExecutor
@@ -79,7 +78,10 @@ object AutPlayRuntime {
                             ServicePlaybackSessionOwner(applicationContext),
                             AndroidWaveSourceProbe(applicationContext, database),
                             Media3WavePrefetchExecutor(applicationContext, database),
-                            prefetchMode = { WavePrefetchMode.NEXT },
+                            prefetchMode = {
+                                applicationContext.getSystemService(android.net.ConnectivityManager::class.java).waveConnection()
+                                    .prefetch(applicationNonSecretSettingsStore(applicationContext).settings.first().downloadOnMeteredNetwork)
+                            },
                             projectionStore = GuestWaveProjectionStore(
                                 database,
                                 guestSessionId,
@@ -143,7 +145,8 @@ object AutPlayRuntime {
                 AndroidWaveSourceProbe(context.applicationContext, database),
                 Media3WavePrefetchExecutor(context.applicationContext, database),
                 prefetchMode = {
-                    wavePrefetchMode(settingsStore.settings.first().wavePrefetchMode)
+                    context.getSystemService(android.net.ConnectivityManager::class.java).waveConnection()
+                        .prefetch(settingsStore.settings.first().downloadOnMeteredNetwork)
                 },
             ).also { waveCoordinatorInstance = it; waveCoordinatorIdentity = identity }
         }
@@ -343,8 +346,6 @@ object AutPlayRuntime {
     // Wave's P13 transport owns the `/v1/wave` suffix and therefore receives the `/api` root.
     private fun apiRootBaseUrl(serverBaseUrl: String): String = serverBaseUrl.trimEnd('/') + "/api"
 
-    internal fun wavePrefetchMode(value: String): WavePrefetchMode =
-        runCatching { WavePrefetchMode.valueOf(value) }.getOrDefault(WavePrefetchMode.NEXT)
 }
 
 /** Exact binding lease used to reject responses that cross unbind/reconnect of the same IDs. */

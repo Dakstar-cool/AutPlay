@@ -2,6 +2,7 @@ package app.autplay.ui.desktop
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -24,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +50,8 @@ internal enum class DesktopAccountRoute(val label: DesktopAccountText) {
     Downloads(DesktopAccountText.Downloads), Statistics(DesktopAccountText.Statistics), ImportMatching(DesktopAccountText.ImportMatching),
     Recovery(DesktopAccountText.ServerRecovery),
 }
+
+private val primaryAccountRoutes = listOf(DesktopAccountRoute.Connection, DesktopAccountRoute.Portable, DesktopAccountRoute.Devices)
 
 /** Identity rather than data-class equality prevents an old event from targeting a replacement owner. */
 internal class DesktopAccountSinkKey(private val sink: DesktopAccountActionSink) {
@@ -103,7 +109,7 @@ public fun DesktopAccountWorkspace(
     openDownloads: Boolean = false,
 ): Unit {
     var route by remember(state.scope.lifetime, openDownloads) {
-        mutableStateOf(if (openDownloads) DesktopAccountRoute.Downloads else DesktopAccountRoute.Portable)
+        mutableStateOf(if (openDownloads) DesktopAccountRoute.Downloads else DesktopAccountRoute.Connection)
     }
     val currentState = rememberUpdatedState(state)
     val currentActions = rememberUpdatedState(actions)
@@ -111,17 +117,45 @@ public fun DesktopAccountWorkspace(
         DesktopAccountUiOwner(state, sensitiveOutput, actions, { currentState.value }, { currentActions.value })
     }
     DisposableEffect(owner) { onDispose { owner.retire() } }
+    var moreOpen by remember(state.scope.lifetime, route) { mutableStateOf(false) }
+    val selectRoute: (DesktopAccountRoute) -> Unit = { destination ->
+        moreOpen = false
+        if (destination != route) {
+            owner.retire()
+            route = destination
+        }
+    }
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(DesktopAccountText.Workspace.text(language), style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.semantics { heading() })
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DesktopAccountRoute.entries.forEach { destination ->
-                FilterChip(selected = route == destination, onClick = {
-                    if (route != destination) { owner.retire(); route = destination }
-                }, label = { Text(destination.label.text(language)) }, modifier = Modifier.heightIn(min = 48.dp))
+            val ru = language == DesktopLanguage.Russian
+            primaryAccountRoutes.forEach { destination ->
+                val label = when (destination) {
+                    DesktopAccountRoute.Portable -> if (ru) "Аккаунт" else "Account"
+                    DesktopAccountRoute.Devices -> if (ru) "Устройства" else "Devices"
+                    else -> destination.label.text(language)
+                }
+                FilterChip(selected = route == destination, onClick = { selectRoute(destination) },
+                    label = { Text(label) }, modifier = Modifier.heightIn(min = 48.dp))
+            }
+            Box {
+                val secondarySelected = route !in primaryAccountRoutes
+                FilterChip(selected = secondarySelected, onClick = { moreOpen = true },
+                    label = { Text(if (secondarySelected) route.label.text(language) else if (ru) "Ещё" else "More") },
+                    trailingIcon = { DesktopIcon(DesktopGlyph.Close, null) }, modifier = Modifier.heightIn(min = 48.dp))
+                DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                    DesktopAccountRoute.entries.filterNot { it in primaryAccountRoutes }.forEach { destination ->
+                        DropdownMenuItem(text = { Text(destination.label.text(language)) }, onClick = { selectRoute(destination) })
+                    }
+                }
             }
         }
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+        val contentScroll = rememberScrollState()
+        LaunchedEffect(route, if (route == DesktopAccountRoute.Connection) state.connection.step else null) {
+            contentScroll.scrollTo(0)
+        }
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(contentScroll)
             .semantics { paneTitle = route.label.text(language) }, verticalArrangement = Arrangement.spacedBy(16.dp)) {
             // Scope revisions dispose transient input and frozen confirmations, including A -> B -> A.
             key(state.scope, route, DesktopAccountSinkKey(actions)) {
@@ -142,8 +176,11 @@ public fun DesktopAccountWorkspace(
                     } ?: AccountStatus(DesktopAccountCondition.Unavailable,DesktopAccountIssue.None,language)
                     DesktopAccountRoute.Recovery -> DesktopAccountServerRecoveryContent(owner, language)
                 }
-                if (state.operations.isNotEmpty()) AccountCard(DesktopAccountText.PendingOperations, language) {
-                    state.operations.forEach { operation ->
+                val operations = if (route == DesktopAccountRoute.Connection) state.operations.filter {
+                    it.resumable || it.cancellable || it.condition == DesktopAccountCondition.Pending
+                } else state.operations
+                if (operations.isNotEmpty()) AccountCard(DesktopAccountText.PendingOperations, language) {
+                    operations.forEach { operation ->
                         Text(desktopAccountActionText(operation.action, language), style = MaterialTheme.typography.titleMedium)
                         AccountStatus(operation.condition, operation.issue, language)
                         if (operation.resumable) AccountButton(owner, DesktopAccountAction.ResumeOperation, language, operation.id)

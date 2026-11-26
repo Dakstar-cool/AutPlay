@@ -142,12 +142,16 @@ class InternetMetadataDiscoveryUiTest {
     @Test fun completionIndicatorFollowsVaultAndDeviceDownload() {
         val port = FakePort()
         val work = FakeWork()
-        val status = MutableStateFlow(InternetMusicWorkStatus(listOf(WorkInfo.State.RUNNING)))
+        val status = MutableStateFlow(InternetMusicWorkStatus())
         work.values["search"] = status
         port.source = { _, _, _ -> InternetMusicSearch("search", listOf(InternetMusicCandidate("song", "Song", "Artist", "YouTube", 180000))) }
         compose.setContent { AutPlayTheme {
             InternetMusicSearchSection("Song", 1, session = InternetMusicUiSession(BINDING, port, work))
         } }
+        waitTag("source-actions-song")
+        compose.onNodeWithContentDescription(context.getString(R.string.music_add_download)).performClick()
+        assertEquals(listOf(WorkRequest(BINDING.serverProfileId.value, "search", "song", true)), work.requests.toList())
+        status.value = InternetMusicWorkStatus(listOf(WorkInfo.State.RUNNING))
         waitTag("source-progress-song")
         compose.onNodeWithTag("source-ready-song").assertDoesNotExist()
         status.value = InternetMusicWorkStatus(listOf(WorkInfo.State.SUCCEEDED))
@@ -168,7 +172,7 @@ class InternetMetadataDiscoveryUiTest {
         port.artistTracks = { id, offset -> assertEquals(ARTIST, id); page(listOf(card("recording", RECORDING, "Song (Live)", null, RECORDING, null)), offset) }
         port.hydrate = { receipt(it, CONTEXT_ONE) }
         port.source = { _, _, _ -> InternetMusicSearch("artist-source", listOf(InternetMusicCandidate("actual-candidate", "Actual recording audio", "Performer", "YouTube", 180000))) }
-        mount(port, work, LibrarySearchKind.Artist)
+        mount(port, work, LibrarySearchKind.Artist, query = "Performer")
         click("catalogue-browse-musicbrainz:artist:$ARTIST")
         waitTag("catalogue-source-musicbrainz:recording:$RECORDING")
         assertTrue(port.selections.isEmpty()); assertTrue(port.searches.isEmpty())
@@ -199,7 +203,7 @@ class InternetMetadataDiscoveryUiTest {
         } } }
         compose.waitUntil(5_000) { port.pages.size == 1 }
         compose.runOnIdle {
-            query.value = "new"; kind.value = LibrarySearchKind.Artist; request.value = 2
+            query.value = "Current"; kind.value = LibrarySearchKind.Artist; request.value = 2
             owner.value = BINDING.copy(userId = UserId(OTHER_USER), deviceId = DeviceId(OTHER_DEVICE))
         }
         waitTag("catalogue-browse-musicbrainz:artist:$ARTIST")
@@ -265,9 +269,9 @@ class InternetMetadataDiscoveryUiTest {
         assertTrue(port.selections.isEmpty()); assertTrue(port.searches.isEmpty())
     }
 
-    private fun mount(port: FakePort, work: FakeWork, kind: LibrarySearchKind) {
+    private fun mount(port: FakePort, work: FakeWork, kind: LibrarySearchKind, query: String = "edition") {
         compose.setContent { AutPlayTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
-            InternetMetadataDiscoverySection("edition", kind, 1, InternetMusicUiSession(BINDING, port, work))
+            InternetMetadataDiscoverySection(query, kind, 1, InternetMusicUiSession(BINDING, port, work))
         } } }
     }
     private fun waitTag(tag: String) { compose.waitUntil(5_000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() } }

@@ -17,12 +17,12 @@ import app.autplay.R
 
 @Composable
 internal fun CollectionDetailHeader(
-    title: String, subtitle: String?, date: String?, count: Int, artworkTrackId: String?,
+    title: String, subtitle: String?, date: String?, count: Int?, artworkTrackId: String?,
     onListen: (() -> Unit)?, catalogCoverId: String? = null, onOpenArtist: (() -> Unit)? = null, secondaryAction: (@Composable () -> Unit)? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            AutPlayArtwork(title, Modifier.testTag("collection-artwork"), size = 124.dp, trackId = artworkTrackId, painter = if (artworkTrackId == null) rememberCatalogCover(catalogCoverId) else null)
+            AutPlayArtwork(title, Modifier.testTag("collection-artwork"), size = 124.dp, trackId = artworkTrackId, painter = rememberCatalogCover(catalogCoverId))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
                 if (!subtitle.isNullOrBlank()) {
@@ -31,12 +31,12 @@ internal fun CollectionDetailHeader(
                     Text(subtitle, modifier = artistLink, style = MaterialTheme.typography.bodyLarge,
                         color = if (onOpenArtist != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
-                val tracks = pluralStringResource(R.plurals.ui_library_refresh_collection_track_count, count, count)
+                val tracks = count?.let { pluralStringResource(R.plurals.ui_library_refresh_collection_track_count, it, it) }
                 Text(listOfNotNull(date?.takeIf { it.isNotBlank() }, tracks).joinToString(" · "),
                     color = AutPlayTokens.colors.mutedText, style = MaterialTheme.typography.bodyMedium)
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(itemVerticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { onListen?.invoke() }, enabled = onListen != null, modifier = Modifier.testTag("collection-listen")) {
                 AutPlayPlatformIcon(AutPlayIcon.Play, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
@@ -48,7 +48,7 @@ internal fun CollectionDetailHeader(
 }
 
 @Composable
-internal fun CollectionTrackRow(number: String, title: String, artist: String?, durationMs: Long?, onPlay: (() -> Unit)?, tag: String, onAdd: (() -> Unit)? = null) {
+internal fun CollectionTrackRow(number: String, title: String, artist: String?, durationMs: Long?, onPlay: (() -> Unit)?, tag: String, onAdd: (() -> Unit)? = null, status: String? = null) {
     Surface(onClick = { onPlay?.invoke() }, enabled = onPlay != null, modifier = Modifier.fillMaxWidth().testTag(tag),
         color = AutPlayTokens.colors.raisedSurface, shape = MaterialTheme.shapes.medium) {
         Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -58,7 +58,8 @@ internal fun CollectionTrackRow(number: String, title: String, artist: String?, 
                 Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (!artist.isNullOrBlank()) Text(artist, style = MaterialTheme.typography.bodyMedium,
                     color = AutPlayTokens.colors.mutedText, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (onPlay == null) Text(stringResource(R.string.search_vault_playback_unavailable), style = MaterialTheme.typography.labelSmall)
+                if (status != null) Text(status, style = MaterialTheme.typography.labelSmall)
+                else if (onPlay == null) Text(stringResource(R.string.search_vault_playback_unavailable), style = MaterialTheme.typography.labelSmall)
             }
             if (durationMs != null) Text(formatDuration(durationMs), style = MaterialTheme.typography.labelMedium,
                 color = AutPlayTokens.colors.mutedText)

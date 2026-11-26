@@ -50,6 +50,9 @@ from .discovery import (
     DiscoveryRunCandidateRow,
     DiscoveryRunPageRow,
     DiscoveryRunRow,
+    PreservationCaseRow,
+    PreservationCheckRow,
+    PreservationRunRow,
     SourceAuthorizationRow,
 )
 from .identity import (
@@ -66,6 +69,7 @@ from .identity import (
     ThresholdSetRow,
 )
 from .importing import (
+    CollectionImportRow,
     ImportEntryRow,
     ImportJobRow,
     WebImportOperationReceiptRow,
@@ -326,6 +330,9 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     WebTerminalReceiptRow,
     WebLoginRateWindowRow,
     BulkOperationRow,
+    PreservationCaseRow,
+    PreservationCheckRow,
+    PreservationRunRow,
     SourceAuthorizationRow,
     ArtistPolicyRow,
     ArtistPolicyRevisionRow,
@@ -387,6 +394,7 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     UploadSessionRow,
     UploadChunkRow,
     ImportJobRow,
+    CollectionImportRow,
     ImportEntryRow,
     WebImportOperationReceiptRow,
     MatchDecisionRow,
@@ -452,6 +460,7 @@ __all__ = (
     "CatalogChangeSetRow",
     "CatalogDownloadRow",
     "CatalogExecutionRow",
+    "CollectionImportRow",
     "DeviceAdmissionExchangeReceiptRow",
     "DeviceAdmissionRateWindowRow",
     "DeviceAdmissionRow",
@@ -516,6 +525,9 @@ __all__ = (
     "PortableTasteSignalRow",
     "PresenceHeartbeatRow",
     "PresenceSettingsRow",
+    "PreservationCaseRow",
+    "PreservationCheckRow",
+    "PreservationRunRow",
     "ProfileLifecycleCommandRow",
     "ProfileStatisticsSettingsRow",
     "ProviderMaintenanceRow",

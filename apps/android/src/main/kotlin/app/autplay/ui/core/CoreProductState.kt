@@ -103,6 +103,7 @@ public enum class LibrarySort {
 public enum class LibraryFilter {
     All,
     Loved,
+    OnDevice,
     Downloaded,
     Available,
     Unavailable,
@@ -112,6 +113,7 @@ public enum class DetailKind {
     Track,
     Artist,
     ArtistTracks,
+    ArtistCollaborations,
     ArtistAlbums,
     CatalogRelease,
     CatalogArtistTracks,
@@ -120,7 +122,8 @@ public enum class DetailKind {
 }
 
 /** The id must be an identifier owned by an existing application projection, never display text. */
-public data class DetailTarget(public val kind: DetailKind, public val stableId: String)
+public data class DetailTarget(public val kind: DetailKind, public val stableId: String, public val label: String? = null,
+    public val albumArtist: String? = null)
 
 /** Stable row identity and viewport offset used to restore a list after its data reloads. */
 public data class ListAnchor(
@@ -253,6 +256,7 @@ public data class CoreTrackSummary(
     public val downloaded: Boolean,
     public val availability: TrackAvailability,
     public val canRemove: Boolean = true,
+    public val onDevice: Boolean = false,
 )
 
 public fun filterAndSortTracks(
@@ -264,6 +268,7 @@ public fun filterAndSortTracks(
         when (filter) {
             LibraryFilter.All -> true
             LibraryFilter.Loved -> track.loved
+            LibraryFilter.OnDevice -> track.onDevice
             LibraryFilter.Downloaded -> track.downloaded
             LibraryFilter.Available -> track.availability == TrackAvailability.Available
             LibraryFilter.Unavailable -> track.availability != TrackAvailability.Available

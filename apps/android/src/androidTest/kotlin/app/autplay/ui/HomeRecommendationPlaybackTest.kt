@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.test.platform.app.InstrumentationRegistry
@@ -61,8 +62,11 @@ class HomeRecommendationPlaybackTest {
             personalPlaybackAllowed.value = false
         }
         compose.onNodeWithTag("home-recommendation").assertIsNotEnabled()
-        compose.onNodeWithContentDescription(context.getString(R.string.action_like)).assertIsEnabled().performTouchInput { click() }
-        compose.onNodeWithContentDescription(context.getString(R.string.action_dislike)).assertIsEnabled().performTouchInput { click() }
+        val like = compose.onNodeWithContentDescription(context.getString(R.string.action_like))
+        val dislike = compose.onNodeWithContentDescription(context.getString(R.string.action_dislike))
+        assertTrue(dislike.getUnclippedBoundsInRoot().right <= like.getUnclippedBoundsInRoot().left)
+        like.assertIsEnabled().performTouchInput { click() }
+        dislike.assertIsEnabled().performTouchInput { click() }
         compose.runOnIdle {
             assertEquals(listOf("like:presentation:item", "dislike:presentation:item"), feedback)
             assertEquals(listOf("presentation:item"), played)

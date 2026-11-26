@@ -46,6 +46,7 @@ class SharedPlaylistTest {
         assertEquals(1, entries.distinctBy { it.localUserTrackRefId }.size)
         assertTrue(entries.all { it.unavailable })
         assertNull(db.libraryDao().entryForTrack(entries.first().localUserTrackRefId))
+        assertNull(db.libraryDao().preference(entries.first().localUserTrackRefId))
     }
 
     @Test fun standaloneIntentsMaterializeParentsAndRepeatedEntriesInOrder() = runBlocking {

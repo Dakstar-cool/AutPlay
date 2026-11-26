@@ -1,9 +1,12 @@
 """Bounded metadata packets, actual pipe media and stable media failures."""
 
 import io
+import json
 import os
+import shutil
 import sys
 import wave
+from collections.abc import Sequence
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -22,6 +25,7 @@ from autplay.adapters.media.tools import SubprocessExecutableRunner
 from autplay.adapters.media.track_metadata import FfmpegMetadataReader
 from autplay.domain.track_metadata import MetadataQuery, parse_source_metadata
 from autplay.domain.vault import MediaToolTimeoutError, MediaValidationError
+from autplay.ports.vault import ProcessResult
 
 
 def test_packets_preserve_optional_payload_and_enforce_declared_limit() -> None:
@@ -113,6 +117,53 @@ def test_actual_embedded_reader_measures_audio_duration_without_date_inference(
     embedded = FfmpegMetadataReader(SubprocessExecutableRunner()).read(path)
     assert embedded.duration_ms == 1250 and embedded.fields == {} and embedded.artwork is None
     assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.skipif(
+    not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="requires FFmpeg"
+)
+def test_untagged_audio_measured_gain_and_true_peak_and_silence(tmp_path: Path) -> None:
+    reader = FfmpegMetadataReader(SubprocessExecutableRunner())
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "apps/android/src/androidTest/assets/metadata/metadata-fixture.mp3"
+    )
+    embedded = reader.read(fixture)
+    assert embedded.artwork and embedded.loudness
+    assert embedded.loudness.gain_db == pytest.approx(4.25, abs=0.1)
+    assert embedded.loudness.true_peak == pytest.approx(10 ** (-18.50 / 20), abs=0.002)
+    path = tmp_path / "silence.wav"
+    with wave.open(str(path), "wb") as output:
+        output.setparams((1, 2, 44100, 0, "NONE", ""))
+        output.writeframes(bytes(88200))
+    silence = reader.read(path)
+    assert silence.duration_ms == 1000 and silence.loudness is None
+
+
+def test_front_cover_wins_over_first_attached_picture(tmp_path: Path) -> None:
+    class Runner:
+        def run(
+            self, arguments: Sequence[str], *, timeout_seconds: float, max_output_bytes: int
+        ) -> ProcessResult:
+            if arguments[0] == "ffprobe":
+                streams = [
+                    {
+                        "index": index,
+                        "codec_type": "video",
+                        "disposition": {"attached_pic": 1},
+                        "width": 100,
+                        "height": 100,
+                        "tags": {"comment": picture},
+                    }
+                    for index, picture in enumerate(
+                        ["Cover (back)", "Other", "Cover (front)"], start=1
+                    )
+                ]
+                return ProcessResult(0, json.dumps({"streams": streams}).encode(), b"")
+            assert arguments[arguments.index("-map") + 1] == "0:3"
+            return ProcessResult(0, b"\xff\xd8\xff", b"")
+
+    assert FfmpegMetadataReader(Runner()).read(tmp_path / "covers.mp3").artwork == b"\xff\xd8\xff"
 
 
 def test_query_protocol_roundtrips_multilingual_acquisition_evidence_and_partial_dates() -> None:

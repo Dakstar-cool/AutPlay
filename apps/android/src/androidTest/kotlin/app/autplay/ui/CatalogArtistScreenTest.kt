@@ -31,6 +31,30 @@ class CatalogArtistScreenTest {
     @Test fun keygenChurchDarkAt320dp() = verify("KEYGEN CHURCH", AutPlayThemeMode.Dark)
     @Test fun jointArtistLightAt320dp() = verify("RAGETRAIN", AutPlayThemeMode.Light)
 
+    @Test fun popularTrackCreditsFitOneLineAndOpenTheTappedArtist() {
+        val profile = ServerProfileId(UUID.randomUUID().toString())
+        fun performer(name: String) = ArtistSummary(ArtistKey(profile, ArtistId(UUID.randomUUID().toString())),
+            name, null, null, null, null, null)
+        val apashe = performer("Apashe")
+        val panther = performer("Panther")
+        val recording = ArtistAppearance(null, "RECORDING", null, "Battle Royale (VIP)",
+            ArtistLocalTarget.Track("track"), performers = listOf(apashe, panther))
+        var opened: DetailTarget? = null
+        compose.setContent {
+            AutPlayTheme {
+                Box(Modifier.width(320.dp)) {
+                    CoreProductDetailScreen(CoreProductDetailUiState(DetailTarget(DetailKind.Artist, apashe.key.artistId.value),
+                        artist = ArtistDetail(apashe, emptyList()), artistAppearances = listOf(recording)), onOpenDetail = { opened = it })
+                }
+            }
+        }
+        compose.onNodeWithTag("collection-details").performScrollToNode(hasTestTag("artist-track-preview"))
+        val credit = compose.onNodeWithText("Apashe, Panther", useUnmergedTree = true)
+        credit.assertIsDisplayed()
+        credit.performTouchInput { click(percentOffset(.8f, .5f)) }
+        compose.runOnIdle { assertEquals(DetailTarget(DetailKind.Artist, panther.key.artistId.value), opened) }
+    }
+
     @Test fun libraryAndPublicPagesShareTheFirstTwelveAndPreserveGuestCredits() {
         val artist = UUID.randomUUID().toString()
         val localId = UUID.randomUUID().toString()

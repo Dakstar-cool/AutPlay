@@ -65,12 +65,12 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0078_playlist_snapshots"]
+    assert heads == ["0081_artist_onboarding"]
     assert heads == [EXPECTED_MIGRATION_HEAD]
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 187
+    assert _object_count(database_harness, empty_database_name) == 191
 
     database_harness.downgrade(empty_database_name, "base")
     assert _current_revision(database_harness, empty_database_name) is None
@@ -78,7 +78,37 @@ def test_clean_upgrade_downgrade_and_upgrade_again(
 
     database_harness.upgrade(empty_database_name)
     assert _current_revision(database_harness, empty_database_name) == heads[0]
-    assert _object_count(database_harness, empty_database_name) == 187
+    assert _object_count(database_harness, empty_database_name) == 191
+
+
+def test_artist_welcome_only_for_new_accounts(
+    database_harness: DatabaseHarness, empty_database_name: str
+) -> None:
+    prior = "0080_external_collections"
+    database_harness.upgrade(empty_database_name, prior)
+    with database_harness.connect(empty_database_name) as connection:
+        row = connection.execute(
+            "INSERT INTO account.user_account(display_name) VALUES ('Existing') RETURNING user_id"
+        ).fetchone()
+        assert row is not None
+        old = row[0]
+        connection.commit()
+    database_harness.upgrade(empty_database_name)
+    with database_harness.connect(empty_database_name) as connection:
+        assert connection.execute(
+            "SELECT onboarding_artists FROM account.user_account WHERE user_id=%s", (old,)
+        ).fetchone() == ([],)
+        assert connection.execute(
+            "INSERT INTO account.user_account(display_name) VALUES ('New') "
+            "RETURNING onboarding_artists"
+        ).fetchone() == (None,)
+        connection.execute(
+            "UPDATE account.user_account SET onboarding_artists=ARRAY[uuidv7()] WHERE user_id=%s",
+            (old,),
+        )
+        connection.commit()
+    with pytest.raises(DBAPIError, match="artist choices exist"):
+        database_harness.downgrade(empty_database_name, prior)
 
 
 def test_sona_upgrade_imports_legacy_window_and_preserves_operator_stop(
@@ -224,6 +254,9 @@ def test_every_revision_has_one_linear_predecessor(database_harness: DatabaseHar
         "0076_internet_search_25",
         "0077_catalog_browse_pages",
         "0078_playlist_snapshots",
+        "0079_music_preservation",
+        "0080_external_collections",
+        "0081_artist_onboarding",
     ]
     assert all(not isinstance(revision.down_revision, tuple) for revision in revisions)
 

@@ -19,6 +19,8 @@ import app.autplay.ui.queue.QueueEditorUiState
 
 internal data class NowPlayingRouteActions(
     val togglePlayPause: () -> Unit,
+    val phoneAudioRetryEntry: String? = null,
+    val retryPhoneAudio: (String) -> Unit = {},
     val toggleShuffle: () -> Unit,
     val cycleRepeat: () -> Unit,
     val previous: () -> Unit = {},
@@ -68,14 +70,31 @@ internal fun NowPlayingRouteRenderer(
     onPrevious: () -> Unit = actions.previous,
     onNext: () -> Unit = actions.next,
     serverConnection: PlayerServerConnection = PlayerServerConnection.Offline,
+    transferId: String? = null,
 ) {
     val network = LocalContext.current.getSystemService(android.net.ConnectivityManager::class.java)
     val online by remember(network) { app.autplay.networkAvailability(network) }
         .collectAsState(initial = network.activeNetwork != null)
     var playlistTrack by rememberSaveable { mutableStateOf<String?>(null) }
     playlistTrack?.let { AddTrackToPlaylistDialog(it, actions.playlists, actions.playlistActions, { playlistTrack = null }) }
+    val context = LocalContext.current
+    val permission = app.autplay.playback.phoneAudioReadPermission
+    var requestedEntry by rememberSaveable { mutableStateOf<String?>(null) }
+    val phoneAccess = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val entry = requestedEntry
+        requestedEntry = null
+        if (granted && entry != null && entry == actions.phoneAudioRetryEntry) actions.retryPhoneAudio(entry)
+    }
+    val entry = actions.phoneAudioRetryEntry
     NowPlayingScreen(
         state = state,
+        requestPhoneAudio = if (entry != null && entry == state.mediaId &&
+            context.checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) ({
+            requestedEntry = entry
+            phoneAccess.launch(permission)
+        }) else null,
         artists = actions.artists,
         onAddToPlaylist = state.localTrackRefId?.let { { playlistTrack = it } },
         onOpenArtist = actions.openArtist,
@@ -111,6 +130,7 @@ internal fun NowPlayingRouteRenderer(
         queueActions = actions.queue,
         onDownload = actions.download,
         downloadState = downloadState,
+        transferId = transferId,
         serverConnection = if (online) serverConnection else PlayerServerConnection.Offline,
         modifier = modifier,
     )

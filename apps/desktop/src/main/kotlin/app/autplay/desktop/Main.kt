@@ -117,6 +117,11 @@ import app.autplay.ui.desktop.AutPlayDesktopShell
 import app.autplay.ui.desktop.AutPlayDesktopTheme
 import app.autplay.ui.desktop.DesktopLanguage
 import app.autplay.ui.desktop.DesktopAccountWorkspace
+import app.autplay.ui.desktop.DesktopAccountAction
+import app.autplay.ui.desktop.DesktopAccountCommand
+import app.autplay.ui.desktop.DesktopAccountIntent
+import app.autplay.ui.desktop.DesktopAccountSecret
+import app.autplay.ui.desktop.DesktopServerAddressStep
 import app.autplay.ui.desktop.DesktopAccentPalette
 import app.autplay.ui.desktop.DesktopCopyInspectionCallbacks
 import app.autplay.ui.desktop.DesktopLibraryCallbacks
@@ -1205,7 +1210,9 @@ public fun DesktopApp(
     var initialAlbum by remember(host) { mutableStateOf<LocalRelease?>(null) }
     var libraryKind by remember(host) { mutableStateOf(DesktopLibraryKind.Track) }
     var downloadsRequested by remember(host) { mutableStateOf(false) }
-    var accountsVisible by remember(host) { mutableStateOf(false) }
+    // Keep the initiating account screen open when first-use storage replaces the runtime.
+    var accountsVisible by remember(chooserOwner) { mutableStateOf(false) }
+    var firstServerRequest by remember(chooserOwner) { mutableStateOf<Pair<DesktopRuntime, String>?>(null) }
     var pendingNavigation by remember(host, chooserOwner) { mutableStateOf<DesktopNavigationIntent?>(null) }
     var navigationFailed by remember(host, chooserOwner) { mutableStateOf(false) }
     val accountWorkspace = host?.accounts
@@ -1250,16 +1257,17 @@ public fun DesktopApp(
         onDispose { if (accountCatalogVisible) accountWorkspace?.setCatalogVisible?.invoke(false) }
     }
     LaunchedEffect(lifecycleState.closing) {
-        if (lifecycleState.closing) { navigationRevision += 1; pendingNavigation = null; accountsVisible = false }
+        if (lifecycleState.closing) { navigationRevision += 1; pendingNavigation = null; accountsVisible = false; firstServerRequest = null }
     }
     LaunchedEffect(windowVisible) {
-        if (!windowVisible) { navigationRevision += 1; pendingNavigation = null; navigationFailed = false }
+        if (!windowVisible) { navigationRevision += 1; pendingNavigation = null; navigationFailed = false; firstServerRequest = null }
     }
     fun navigationCurrent(): Boolean = callbackLifetime.get() && currentWindowVisible && !currentClosing &&
         pendingNavigation == null && accountWorkspace?.contextSettlement?.value.let { it == null || it == DesktopContextSettlement.Ready } &&
         section == sectionAtInput && libraryKind == kindAtInput && accountsVisible == accountsAtInput && navigationRevision == navigationAtInput
     fun requestNavigation(nextSection: DesktopSection, nextKind: DesktopLibraryKind, nextAccounts: Boolean): Unit {
         if (!callbackLifetime.get() || currentClosing || !currentWindowVisible) return
+        firstServerRequest = null
         // Retire every old UI callback before the retained owner starts any suspendable drain.
         navigationRevision += 1
         val owner = accountWorkspace?.accountOwner?.invoke()
@@ -1320,6 +1328,17 @@ public fun DesktopApp(
         "EN" -> DesktopLanguage.English
         else -> sessionLanguage
     }
+    if (music != null && musicLease != null && !accountsVisible) key(music, musicLease) {
+        val ru = language == DesktopLanguage.Russian
+        app.autplay.ui.welcome.showArtistWelcomeDialog(ru,
+            pending = { music.artistWelcomePending(musicLease) },
+            browse = { parent, query, seen -> music.welcomeArtists(musicLease, parent, query, seen) },
+            finish = { ids -> music.finishArtistWelcome(musicLease, ids) },
+            importFavorites = { close ->
+                app.autplay.desktop.presentation.CollectionDialog(music, musicLease, ru, initialFavorites = true, close = close)
+            },
+        )
+    }
     val themeMode = when (storedPreferences?.appearanceMode) {
         "SYSTEM" -> DesktopThemeMode.System
         "LIGHT" -> DesktopThemeMode.Light
@@ -1362,6 +1381,22 @@ public fun DesktopApp(
         val accountState = accountWorkspace.state.collectAsState().value
         val sensitiveOutput = accountWorkspace.sensitiveOutput.collectAsState().value
         val accountAvailability = accountWorkspace.availability.collectAsState().value
+        LaunchedEffect(accountWorkspace, accountState, accountAvailability, firstServerRequest, accountInitializationFailed) {
+            val (initialHost, origin) = firstServerRequest ?: return@LaunchedEffect
+            if (accountInitializationFailed) { firstServerRequest = null; return@LaunchedEffect }
+            if (host === initialHost) return@LaunchedEffect
+            if (!navigationCurrent() || accountAvailability !in setOf(DesktopAccountAvailability.Opening, DesktopAccountAvailability.Available)) {
+                firstServerRequest = null
+                return@LaunchedEffect
+            }
+            if (accountAvailability != DesktopAccountAvailability.Available || accountWorkspace.state.value !== accountState) return@LaunchedEffect
+            val permit = accountState.permits.singleOrNull { it.action == DesktopAccountAction.Discover && it.targetId == null }
+                ?: return@LaunchedEffect
+            firstServerRequest = null
+            val command = DesktopAccountCommand.Discover(DesktopAccountSecret(origin))
+            try { accountWorkspace.actions.dispatch(DesktopAccountIntent(accountState.scope, permit, command)) }
+            finally { command.enteredOrigin.clear() }
+        }
         val accountPlayer = host?.playerState?.collectAsState()?.value
         AutPlayDesktopTheme(themeMode, accentPalette) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -1371,7 +1406,10 @@ public fun DesktopApp(
                             requestNavigation(section, libraryKind, false)
                         }
                     }) {
-                        Text(if (language == DesktopLanguage.Russian) "Назад к библиотеке" else "Back to library")
+                        val ru = language == DesktopLanguage.Russian
+                        Text(if (section == DesktopSection.Settings) {
+                            if (ru) "Назад к настройкам" else "Back to settings"
+                        } else if (ru) "Назад" else "Back")
                     }
                     if (accountAvailability == DesktopAccountAvailability.Available) {
                         DesktopAccountWorkspace(accountState, accountWorkspace.actions, language,
@@ -1388,10 +1426,15 @@ public fun DesktopApp(
                         }
                     } else {
                         val ru = language == DesktopLanguage.Russian
-                        Text(when (accountAvailability) {
-                            DesktopAccountAvailability.InitializeRequired -> if (ru)
-                                "Создать хранилище аккаунтов на этом Mac? Учётные данные защищены macOS; локальные метаданные аккаунтов хранятся без шифрования."
-                                else "Create account storage on this Mac? macOS protects credentials; local account metadata is stored unencrypted."
+                        if (accountAvailability == DesktopAccountAvailability.InitializeRequired && onInitializeAccounts != null) {
+                            DesktopServerAddressStep(language, !initializingAccounts && !lifecycleState.closing && !accountInitializationFailed,
+                                createStorage = true) { origin ->
+                                if (navigationCurrent() && !initializingAccounts && !accountInitializationFailed) {
+                                    firstServerRequest = (host ?: return@DesktopServerAddressStep) to origin
+                                    onInitializeAccounts()
+                                }
+                            }
+                        } else Text(when (accountAvailability) {
                             DesktopAccountAvailability.IdentityUnavailable -> if (ru)
                                 "Аккаунты недоступны: требуется квалифицированная подписанная сборка для этого Mac."
                                 else "Accounts are unavailable. A qualified signed build for this Mac is required."
@@ -1414,7 +1457,7 @@ public fun DesktopApp(
                         if (accountAvailability == DesktopAccountAvailability.InitializeRequired && onInitializeAccounts != null) {
                             TextButton(enabled = !initializingAccounts && !lifecycleState.closing && !accountInitializationFailed,
                                 onClick = { if (navigationCurrent() && !lifecycleState.closing) onInitializeAccounts() }) {
-                                Text(if (ru) "Создать хранилище аккаунтов" else "Create account storage")
+                                Text(if (ru) "Создать только локальное хранилище" else "Create local storage only")
                             }
                         }
                         if ((accountAvailability == DesktopAccountAvailability.Retired ||
@@ -1715,6 +1758,20 @@ public fun DesktopApp(
             }
             if (accountTab && accountCatalogState != null && accountWorkspace != null) {
                 val detail = accountCatalogState.catalog.detail
+                if (music != null && musicLease != null && detail != null &&
+                    detail.key.kind in setOf(DesktopCatalogKind.Album, DesktopCatalogKind.Release) &&
+                    accountCatalogState.catalog.currentAccountScopeId == musicLease.scopeId.value) {
+                    val title = detail.title ?: accountCatalogState.catalog.canonicalPositions?.entries
+                        ?.firstOrNull { it.releaseId == detail.key.id }?.releaseTitle
+                    if (!title.isNullOrBlank()) {
+                        fun fact(field: app.autplay.ui.desktop.DesktopCatalogField) = detail.facts.firstOrNull { it.field == field }?.value
+                        val edition = fact(app.autplay.ui.desktop.DesktopCatalogField.ProviderEdition)
+                            ?.takeIf { fact(app.autplay.ui.desktop.DesktopCatalogField.Provider) == "MUSICBRAINZ" }
+                            ?.let { runCatching { app.autplay.application.desktop.account.AccountUuid(it) }.getOrNull() }
+                        app.autplay.desktop.presentation.DesktopAlbumTracklist(music, musicLease, language == DesktopLanguage.Russian,
+                            title, detail.subtitle, edition, fact(app.autplay.ui.desktop.DesktopCatalogField.ReleaseDate)?.take(4))
+                    }
+                }
                 if (music != null && musicLease != null && detail?.key?.kind == DesktopCatalogKind.Artist &&
                     accountCatalogState.catalog.currentAccountScopeId == musicLease.scopeId.value) key(musicLease, detail.key) {
                     app.autplay.desktop.presentation.ArtistDiscographyButton(music, musicLease, detail.key.id, detail.title.orEmpty(),
@@ -1722,7 +1779,10 @@ public fun DesktopApp(
                 }
                 DesktopLibraryCatalogBrowser(accountCatalogState, accountWorkspace.actions, catalogKind, language,
                     isNavigationCurrent = { navigationCurrent() && accountCatalogVisible && !lifecycleState.closing })
-            } else DesktopLocalCollectionBrowser(localIndex, catalogKind, initialAlbum.takeIf { catalogKind == DesktopCatalogKind.Album }, language) { ids ->
+            } else DesktopLocalCollectionBrowser(localIndex, catalogKind, initialAlbum.takeIf { catalogKind == DesktopCatalogKind.Album }, language,
+                tracklist = if (music != null && musicLease != null) ({ album ->
+                    app.autplay.desktop.presentation.DesktopAlbumTracklist(music, musicLease, language == DesktopLanguage.Russian, album.album, album.artist)
+                }) else null) { ids ->
                 command { it.playLocalTracks(ids, "LIBRARY") }
             }
         }) else null,

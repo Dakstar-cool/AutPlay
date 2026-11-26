@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 
 from autplay.application.catalog_downloads import CatalogDownloads
@@ -66,6 +66,12 @@ def create_music_discovery_router(
     def download_status(request: Request, operation: UUID) -> dict[str, object]:
         return download_service().command(principal(request), operation, "status")
 
+    @router.post("/downloads/{operation}/device-files")
+    def device_files(
+        request: Request, operation: UUID, offset: Annotated[int, Query(ge=0)] = 0
+    ) -> dict[str, object]:
+        return download_service().device_files(principal(request), operation, offset)
+
     @router.post("/downloads/{operation}/{action}")
     def advance(
         request: Request, operation: UUID, action: Literal["advance", "start"]
@@ -75,6 +81,13 @@ def create_music_discovery_router(
     @router.get("/releases/{release_id}/cover")
     def cover(request: Request, release_id: UUID) -> Response:
         data = available().release_cover(principal(request), release_id)
+        return Response(
+            data, media_type="image/png" if data.startswith(b"\x89PNG") else "image/jpeg"
+        )
+
+    @router.get("/artists/{artist_id}/portrait")
+    def artist_portrait(request: Request, artist_id: UUID) -> Response:
+        data = available().artist_portrait(principal(request), artist_id)
         return Response(
             data, media_type="image/png" if data.startswith(b"\x89PNG") else "image/jpeg"
         )
@@ -92,6 +105,17 @@ def create_music_discovery_router(
         offset: Annotated[int, Query(ge=0, le=1000)] = 0,
     ) -> dict[str, object]:
         return available().search(principal(request), q, kind, limit=limit, offset=offset)
+
+    @router.get("/artists/{artist_id}/overview")
+    def artist_overview(
+        artist_id: UUID,
+        request: Request,
+        background_tasks: BackgroundTasks,
+        baseline: UUID | None = None,
+    ) -> dict[str, object]:
+        return available().artist_overview(
+            principal(request), artist_id, background_tasks.add_task, baseline
+        )
 
     @router.get("/artists/{artist_id}/releases")
     def artist_releases(
@@ -122,6 +146,19 @@ def create_music_discovery_router(
     ) -> dict[str, object]:
         return available().release_tracks(
             principal(request), release_id, limit=limit, offset=offset
+        )
+
+    @router.get("/album-tracklist")
+    def album_tracklist(
+        request: Request,
+        mbid: UUID | None = None,
+        discogs_id: Annotated[int | None, Query(ge=1, le=9_999_999_999_999_999)] = None,
+        title: Annotated[str, Query(max_length=500)] = "",
+        artist: Annotated[str, Query(max_length=500)] = "",
+        year: Annotated[int | None, Query(ge=1, le=9999)] = None,
+    ) -> dict[str, object]:
+        return available().album_tracklist(
+            principal(request), mbid, discogs_id, title.strip(), artist.strip(), year
         )
 
     return router

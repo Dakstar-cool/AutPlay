@@ -34,7 +34,7 @@ def target() -> dict[str, object]:
         "identity_spki_b64": base64.b64encode(b"i" * 91).decode(),
         "server_source": "a" * 40,
         "server_image": "sha256:" + "b" * 64,
-        "schema_head": "0078_playlist_snapshots",
+        "schema_head": "0081_artist_onboarding",
         "deployment_receipt_sha256": "c" * 64,
         "backup_restore_receipt_sha256": "d" * 64,
         "production_deployed": True,

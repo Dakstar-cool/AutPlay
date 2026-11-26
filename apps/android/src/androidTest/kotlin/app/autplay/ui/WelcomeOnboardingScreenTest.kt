@@ -104,15 +104,18 @@ class WelcomeOnboardingScreenTest {
             AutPlayTheme {
                 WelcomeOnboardingScreen(
                     createAccount = { _, _ -> error("Must not create an existing account") },
-                    existingAccount = { chosenId = it; true },
+                    existingAccount = { _, id, _ -> chosenId = id; true },
                     onComplete = { _, _ -> error("Existing-account route owns navigation") },
                 )
             }
         }
-        field(R.string.ui_friends_refresh_public_id_label).performTextInput("@Local_Listener")
-        submit().assertIsNotEnabled()
         composeRule.onNodeWithText(context.getString(R.string.portable_account_existing))
-            .performScrollTo().performClick()
+            .assertIsEnabled().performScrollTo().performClick()
+        field(R.string.profile_server_origin).performTextInput("https://music.example")
+        field(R.string.ui_friends_refresh_public_id_label).performTextInput("@Local_Listener")
+        field(R.string.portable_account_password).performScrollTo().performTextInput(phrase)
+        composeRule.onNodeWithText(context.getString(R.string.portable_account_sign_in)).performScrollTo().performClick()
+        composeRule.waitUntil(5_000) { chosenId != null }
         composeRule.runOnIdle { assertEquals("local_listener", chosenId) }
     }
 

@@ -31,6 +31,7 @@
     "tombstones": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/tombstone"}},
     "redirects": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/redirect"}},
     "next_page_token": {"anyOf": [{"$ref": "#/$defs/token"}, {"type": "null"}]},
+    "personal_library_version": {"const": 1, "description": "Negotiated PERSONAL_LIBRARY_V1 projection. Library entries include personal_save."},
     "has_more": {"type": "boolean"},
     "snapshot_cursor": {"anyOf": [{"$ref": "#/$defs/token"}, {"type": "null"}]},
     "pending_event_directive": {"const": "PRESERVE_REBASE_RETRY"},

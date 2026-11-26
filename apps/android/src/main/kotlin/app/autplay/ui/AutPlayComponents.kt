@@ -84,8 +84,9 @@ public fun AutPlayArtwork(
     size: Dp = 56.dp,
     painter: Painter? = null,
     trackId: String? = null,
+    catalogCoverId: String? = null,
 ) {
-    val artworkPainter = painter ?: rememberTrackArtwork(trackId)
+    val artworkPainter = painter ?: rememberTrackArtwork(trackId) ?: rememberCatalogCover(catalogCoverId)
     val shape = MaterialTheme.shapes.small
     Box(
         modifier = modifier
@@ -213,6 +214,7 @@ private fun platformIconResource(icon: AutPlayIcon): Int = when (icon) {
     AutPlayIcon.Library -> R.drawable.ic_autplay_library
     AutPlayIcon.Playlist, AutPlayIcon.History -> R.drawable.ic_autplay_list
     AutPlayIcon.Download -> R.drawable.ic_autplay_download
+    AutPlayIcon.Downloaded -> R.drawable.ic_autplay_downloaded
     AutPlayIcon.Import -> R.drawable.ic_autplay_upload
     AutPlayIcon.Play -> R.drawable.ic_autplay_play
     AutPlayIcon.Wave -> R.drawable.ic_autplay_wave

@@ -145,6 +145,7 @@ public enum class DesktopAccountCondition {
 public enum class DesktopAccountIssue {
     None, Retry, Reconnect, Unlock, Authentication, Recover, Capacity, IdentityChanged, Expired, Conflict,
     ExportExists, ExportReadback, Unsupported, Storage, CancelPending,
+    ServerConnectionUnsupported, InvalidServerResponse, LocalIdentityUnavailable,
 }
 public data class DesktopAccountOperation(
     public val id: String,
@@ -197,7 +198,20 @@ public class DesktopConnectionView(
     public val invitationReview: DesktopInvitationInputReview? = null,
     public val localChoiceSelected: Boolean = false,
     public val localChoiceSummary: String? = null,
-) { override fun toString(): String = "DesktopConnectionView(<redacted>)" }
+    public val passwordLoginUnavailable: Boolean = false,
+    public val localChangesSelected: Boolean = false,
+    public val serverSelected: Boolean = false,
+) {
+    internal val step: DesktopConnectionStep get() = when {
+        transportReview != null || transportBootstrap != null -> DesktopConnectionStep.Trust
+        bindingId != null -> DesktopConnectionStep.Connected
+        serverSelected -> DesktopConnectionStep.SignIn
+        else -> DesktopConnectionStep.Address
+    }
+    override fun toString(): String = "DesktopConnectionView(<redacted>)"
+}
+
+internal enum class DesktopConnectionStep { Address, Trust, SignIn, Connected }
 public class DesktopTransportBootstrap(public val id: String, public val apiOrigin: String, public val streamOrigin: String,
     public val apiFingerprint: String?, public val streamFingerprint: String?) {
     override fun toString(): String = "DesktopTransportBootstrap(<redacted>)"

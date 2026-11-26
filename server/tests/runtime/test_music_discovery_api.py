@@ -202,7 +202,7 @@ def test_actual_api_uses_one_catalog_runtime_with_owner_transport_and_contained_
         cover = client.get(cover_path, headers={"Authorization": "Bearer owner"})
         assert cover.status_code == 200 and cover.content == COVER
         assert runtime.work.public_reads == [
-            (OWNER, f"https://coverartarchive.org/release/{RELEASE_ID}/front-250")
+            (OWNER, f"https://coverartarchive.org/release/{RELEASE_ID}/front-500")
         ]
         assert constructions == [app.state.settings]
         assert runtime.work.owners == [OWNER, OWNER, OWNER]

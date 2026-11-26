@@ -1,5 +1,15 @@
 package app.autplay.application.library
 
+import app.autplay.ArtistPageCache
+import app.autplay.application.artist.ArtistAppearance
+import app.autplay.OfflineCoreDetailState
+import app.autplay.application.artist.ArtistCatalogPort
+import app.autplay.application.artist.RoomArtistCatalogPort
+import app.autplay.application.artist.ArtistDetail
+import app.autplay.application.artist.ArtistKey
+import app.autplay.application.artist.ArtistSummary
+import app.autplay.ui.core.DetailKind
+import app.autplay.ui.core.DetailTarget
 import androidx.room3.useWriterConnection
 import androidx.room3.withWriteTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -72,6 +82,8 @@ class AlbumGroupRoomTest {
             val core = CoreProductRepository(db)
             assertEquals(first.group.stableId, core.releases(profile).first().single().stableId)
             val detail = core.releaseDetail(first.group.stableId, profile)!!
+            assertEquals("one", second.artworkTrackId)
+            assertEquals("one", detail.artworkTrackId)
             assertNull(detail.serverReleaseId)
             assertEquals(listOf("one", "two"), detail.tracks.map { it.localUserTrackRefId })
             assertTrue(detail.tracks.all { it.localRecordingId == null })
@@ -86,6 +98,72 @@ class AlbumGroupRoomTest {
         assertEquals(buildJsonArray { add("Rock") }, db.trackMetadataDao().get(profile, "one")!!.decoded().fields["genres"])
         assertEquals(JsonPrimitive("FUTURE_PROVIDER"), db.trackMetadataDao().get(profile, "one")!!.decoded().provenance
             .getValue("title").jsonObject["source"])
+    }
+
+    @Test fun returningFromAnAlbumReusesArtistDataUntilInvalidated(): Unit = runBlocking {
+        val room = RoomArtistCatalogPort(db)
+        val cache = ArtistPageCache()
+        val core = CoreProductRepository(db)
+        val artist = DetailTarget(DetailKind.Artist, UUID(0, 452).toString())
+        var name: String? = "Joji"
+        var reads = 0
+        val continueFirstRead = CompletableDeferred<Unit>()
+        val headerReady = CompletableDeferred<Unit>()
+        val port = object : ArtistCatalogPort by room {
+            override suspend fun loadArtistPage(key: ArtistKey, creditLimit: Int, memberLimit: Int,
+                onDetail: (ArtistDetail) -> Unit): List<ArtistAppearance>? {
+                reads++
+                val current = name ?: return null
+                onDetail(ArtistDetail(ArtistSummary(key, current, null, null, null, null, null), emptyList()))
+                headerReady.complete(Unit)
+                continueFirstRead.await()
+                return emptyList()
+            }
+        }
+        val state = OfflineCoreDetailState(cache)
+        suspend fun load(page: OfflineCoreDetailState) = page.load(core, port, artist, null, "standalone") {}
+        val first = launch { load(state) }
+        withTimeout(5_000) { headerReady.await() }
+        assertEquals("Joji", state.artist?.summary?.name)
+        assertFalse(state.loading)
+        assertTrue(state.artistContentLoading)
+        continueFirstRead.complete(Unit)
+        first.join()
+        assertFalse(state.artistContentLoading)
+
+        val returned = OfflineCoreDetailState(cache)
+        returned.restoreArtist(null, "standalone", artist)
+        assertTrue(returned.matches("standalone", artist))
+        assertEquals("Joji", returned.artist?.summary?.name)
+        load(returned)
+        assertEquals(1, reads)
+
+        cache.invalidate()
+        name = "Updated artist"
+        val stale = OfflineCoreDetailState(cache)
+        stale.restoreArtist(null, "standalone", artist)
+        assertEquals("Joji", stale.artist?.summary?.name)
+        load(stale)
+        assertEquals("Updated artist", stale.artist?.summary?.name)
+        assertEquals(2, reads)
+        cache.invalidate()
+        name = null
+        load(stale)
+        assertNull(stale.artist)
+        assertTrue(stale.error)
+        val missing = OfflineCoreDetailState(cache)
+        missing.restoreArtist(null, "standalone", artist)
+        assertNull(missing.artist)
+    }
+
+    @Test fun artistAlbumOpensBothPartialEditionsInTrackOrder(): Unit = runBlocking {
+        seed("one", identity = "territory-a", track = 1)
+        seed("two", identity = "territory-b", track = 2)
+        val core = CoreProductRepository(db)
+        val releases = core.artistReleases(profile, setOf("one", "two"))
+        val album = app.autplay.ui.artistAlbums(emptyList(), emptyList(), releases).single()
+        val detail = requireNotNull(core.releaseDetail(requireNotNull(album.target).stableId, profile))
+        assertEquals(listOf("one", "two"), detail.tracks.map { it.localUserTrackRefId })
     }
 
     @Test fun membershipReactivelyTracksClearDeletionRestoreAndSameTimestampEditionChange(): Unit = runBlocking {

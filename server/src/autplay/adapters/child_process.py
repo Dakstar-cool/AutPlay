@@ -31,8 +31,12 @@ def metadata_child_launch(*, proxy: str | None = None) -> tuple[list[str], dict[
     return arguments, environment
 
 
-def catalog_child_launch(*, proxy: str | None = None) -> tuple[list[str], dict[str, str]]:
+def catalog_child_launch(
+    *, proxy: str | None = None, discogs_token: str | None = None
+) -> tuple[list[str], dict[str, str]]:
     arguments, environment = _python_child_launch("autplay.adapters.filesystem.catalog_child")
+    if discogs_token:
+        environment["AUTPLAY_DISCOGS_TOKEN"] = discogs_token
     if proxy is not None:
         environment["AUTPLAY_METADATA_PROXY"] = proxy
     return arguments, environment

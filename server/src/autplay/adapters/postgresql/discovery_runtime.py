@@ -979,10 +979,15 @@ class PostgresBulkDiscoveryRepository:
         limits: VaultLimits,
     ) -> AcquisitionPrepared:
         """Materialize within an already locked/authorized caller-owned transaction."""
+        from autplay.application.sync import _acquire_sync_owner_publish_lock
+        from autplay.application.vault_names import project_owner_names
+
         owner_user_id = candidate.user_id
+        _acquire_sync_owner_publish_lock(self._session, owner_user_id)
         recording, user_ref, library_entry, external_reference = self._materialize_identity(
             candidate, evidence
         )
+        project_owner_names(self._session, user_ref, recording.recording_id)
         upload_id = uuid5(
             NAMESPACE_URL,
             f"autplay:a1c-provider-upload-v1:{attempt.acquisition_attempt_id}",

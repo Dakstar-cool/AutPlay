@@ -335,10 +335,28 @@ class OfflineRecommendationRepositoryTest {
             ),
         )
 
-        val ownedArtistReleases = database.recommendationPackDao().recentRelevantReleases(PROFILE, USER, 10)
-        val otherProfileReleases = database.recommendationPackDao().recentRelevantReleases(OTHER_PROFILE, OTHER_USER, 10)
+        val ownedArtistReleases = database.recommendationPackDao().recentRelevantReleases(PROFILE, USER, "2026-08-11", "2026-08-17")
+        val otherProfileReleases = database.recommendationPackDao().recentRelevantReleases(OTHER_PROFILE, OTHER_USER, "2026-08-11", "2026-08-17")
         assertEquals(listOf(RELEASE), ownedArtistReleases.map { it.localReleaseId })
         assertTrue(otherProfileReleases.isEmpty())
+
+        val today = java.time.Instant.parse("2026-08-17T12:00:00Z").toEpochMilli()
+        val repo = OfflineRecommendationRepository(database)
+        repeat(3) {
+            val ref = LocalId.random().value
+            seedLocalTrack(database, PROFILE, ref, LocalId.random().value, LocalId.random().value, entryId = LocalId.random().value)
+            database.libraryDao().upsertPreference(UserTrackPreferenceEntity(ref, "LIKED", null, false, "SYNCED", 0, today, PROFILE))
+        }
+        val withoutPack = repo.loadHomeFeed(BINDING, today)
+        assertEquals("NO_USABLE_OFFLINE_PACK", withoutPack.statusCode)
+        assertEquals(listOf(RELEASE), withoutPack.recentRelevantReleases.map { it.localReleaseId })
+        val albums = app.autplay.application.library.CoreProductRepository(database)
+        assertEquals("New release without owned tracks",
+            albums.releaseDetail(RELEASE, PROFILE, withoutPack.recentRelevantReleases.single())?.title)
+        val otherOwner = ClientEventBinding(UserId(OTHER_USER), BINDING.deviceId, BINDING.serverProfileId)
+        val otherFeed = repo.loadHomeFeed(otherOwner, today)
+        assertTrue(otherFeed.releaseArtists.isEmpty())
+        org.junit.Assert.assertNull(albums.releaseDetail(RELEASE, OTHER_PROFILE, withoutPack.recentRelevantReleases.single()))
     }
 
     @Test

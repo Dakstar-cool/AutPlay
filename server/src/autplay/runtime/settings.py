@@ -49,6 +49,7 @@ _COMMON_ENV_FIELDS: Final = {
     "vault_low_disk_bytes": "VAULT_LOW_DISK_BYTES",
 }
 _API_ENV_FIELDS: Final = {
+    "discogs_token": "DISCOGS_TOKEN",
     "catalog_cgroup_root": "CATALOG_CGROUP_ROOT",
     "acoustid_client_key": "ACOUSTID_CLIENT_KEY",
     "metadata_proxy": "METADATA_PROXY",
@@ -124,6 +125,7 @@ _WORKER_ENV_FIELDS: Final = {
 }
 _SECRET_FIELDS: Final = frozenset(
     {
+        "discogs_token",
         "training_consent_ledger_key",
         "privacy_ledger_key",
         "database_url",
@@ -137,7 +139,9 @@ _SECRET_FIELDS: Final = frozenset(
         "metadata_proxy",
     }
 )
-_FILE_ONLY_SECRET_FIELDS: Final = frozenset({"jamendo_client_id", "acoustid_client_key"})
+_FILE_ONLY_SECRET_FIELDS: Final = frozenset(
+    {"jamendo_client_id", "acoustid_client_key", "discogs_token"}
+)
 
 
 class RuntimeProfile(StrEnum):
@@ -304,6 +308,7 @@ class _ExplicitSettings(BaseSettings):
 class ApiSettings(_ExplicitSettings):
     """Validated settings available only to the HTTP API process."""
 
+    discogs_token: SecretStr = Field(default=SecretStr(""), repr=False)
     internet_music_enabled: bool = False
     catalog_cgroup_root: Path | None = None
     acoustid_client_key: SecretStr = Field(default=SecretStr(""), repr=False)

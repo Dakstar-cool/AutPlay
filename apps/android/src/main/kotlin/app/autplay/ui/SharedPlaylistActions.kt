@@ -2,6 +2,7 @@ package app.autplay.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +16,7 @@ import app.autplay.AutPlayRuntime
 import app.autplay.R
 import app.autplay.application.library.LibraryVerticalSliceRepository
 import app.autplay.application.library.SharedPlaylist
+import app.autplay.application.library.PlaylistImportFile
 import app.autplay.application.library.playlistPublication
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.settings.NonSecretSettings
@@ -28,8 +30,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private fun NonSecretSettings.playlistBinding(): ClientEventBinding? {
+    if (accountSignedOut) return null
     val profile = activeServerProfileId ?: return null
-    return ClientEventBinding(checkNotNull(activeUserId), checkNotNull(deviceId), profile)
+    return ClientEventBinding(activeUserId ?: return null, deviceId ?: return null, profile)
 }
 
 @Composable
@@ -74,25 +77,65 @@ internal fun ImportPlaylistAction() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by remember(context) { applicationNonSecretSettingsStore(context).settings }.collectAsState(initial = null)
-    val profile = settings?.activeServerProfileId
-    var uri by rememberSaveable(profile) { mutableStateOf<String?>(null) }
-    var operation by rememberSaveable(profile) { mutableStateOf<String?>(null) }
-    var snapshot by remember(uri) { mutableStateOf<SharedPlaylist?>(null) }
+    val recipient = settings?.playlistBinding()
+    var opening by rememberSaveable(recipient) { mutableStateOf(false) }
+    var link by rememberSaveable(recipient) { mutableStateOf("") }
+    var uri by rememberSaveable(recipient) { mutableStateOf<String?>(null) }
+    var operation by rememberSaveable(recipient) { mutableStateOf<String?>(null) }
+    var snapshot by remember(uri) { mutableStateOf<PlaylistImportFile?>(null) }
     var error by remember(uri) { mutableIntStateOf(0) }
     var busy by remember(uri) { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selected ->
         if (selected != null) {
+            opening = false
             operation = LocalId.random().value
             uri = selected.toString()
         }
     }
-    OutlinedButton(enabled = settings != null, onClick = { picker.launch(arrayOf("*/*")) }) {
+    OutlinedButton(enabled = recipient != null, onClick = { opening = true }) {
         Text(stringResource(R.string.playlist_import_file))
     }
-    LaunchedEffect(uri) {
+    var externalLink by rememberSaveable(recipient) { mutableStateOf<String?>(null) }
+    var favorites by rememberSaveable(recipient) { mutableStateOf(false) }
+    OutlinedButton(enabled = recipient != null, onClick = { favorites = false; externalLink = "" }) {
+        Text(stringResource(R.string.ext_import))
+    }
+    OutlinedButton(enabled = recipient != null, onClick = { favorites = true; externalLink = "" }) {
+        Text(stringResource(R.string.ext_favorites))
+    }
+    if (recipient != null) externalLink?.let { initial ->
+        ExternalCollectionDialog(recipient, initial, favorites) { externalLink = null }
+    }
+    if (settings != null && recipient == null) Text(stringResource(R.string.playlist_import_needs_account))
+    if (opening) AutPlayDialog(
+        onDismissRequest = { opening = false },
+        title = { Text(stringResource(R.string.playlist_import_file)) },
+        text = { Column {
+            OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text(stringResource(R.string.playlist_choose_file)) }
+            OutlinedTextField(value = link, onValueChange = { link = it.take(2048) }, singleLine = true,
+                label = { Text(stringResource(R.string.playlist_link)) })
+        } },
+        confirmButton = { TextButton(enabled = link.trim().let { it.startsWith("https://") || it.startsWith("http://") }, onClick = {
+            operation = LocalId.random().value
+            if (app.autplay.application.library.ExternalCollection.isProviderLink(link)) {
+                favorites = false
+                externalLink = link.trim()
+            } else uri = link.trim()
+            opening = false
+        }) { Text(stringResource(R.string.playlist_preview)) } },
+        dismissButton = { TextButton(onClick = { opening = false }) { Text(stringResource(android.R.string.cancel)) } },
+    )
+    val fallbackName = stringResource(R.string.playlist_import_file)
+    LaunchedEffect(uri, fallbackName) {
         val selected = uri?.let(Uri::parse) ?: return@LaunchedEffect
         try {
             snapshot = withContext(Dispatchers.IO) {
+                if (selected.scheme in setOf("http", "https")) {
+                    val current = applicationNonSecretSettingsStore(context).settings.first()
+                    check(current.playlistBinding() == recipient)
+                    return@withContext AutPlayRuntime.serverFeatures(context, checkNotNull(recipient))
+                        .openPlaylistLink(selected.toString())
+                }
                 require(selected.scheme == "content")
                 checkNotNull(context.contentResolver.openInputStream(selected)).use { input ->
                     val buffer = ByteArray(8192)
@@ -103,7 +146,9 @@ internal fun ImportPlaylistAction() {
                         require(output.size() + size <= SharedPlaylist.MAX_FILE_BYTES)
                         output.write(buffer, 0, size)
                     }
-                    SharedPlaylist.decode(output.toByteArray())
+                    val name = context.contentResolver.query(selected, arrayOf(OpenableColumns.DISPLAY_NAME),
+                        null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+                    PlaylistImportFile.decode(output.toByteArray(), name ?: fallbackName)
                 }
             }
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -126,10 +171,10 @@ internal fun ImportPlaylistAction() {
             scope.launch {
                 try {
                     val current = applicationNonSecretSettingsStore(context).settings.first()
-                    check(current.activeServerProfileId == profile)
+                    check(current.playlistBinding() == recipient)
                     val repository = LibraryVerticalSliceRepository(AutPlayRuntime.database(context),
                         syncScheduler = AutPlayRuntime.syncScheduler(context))
-                    repository.saveSharedPlaylist(current.playlistBinding(), copyId, copy, System.currentTimeMillis())
+                    repository.saveImportedPlaylist(checkNotNull(recipient), copyId, copy, System.currentTimeMillis())
                     Toast.makeText(context, R.string.playlist_copy_saved, Toast.LENGTH_SHORT).show()
                     uri = null
                 } catch (cancelled: CancellationException) { throw cancelled }

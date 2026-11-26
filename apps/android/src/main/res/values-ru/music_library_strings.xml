@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="album_discogs_id">Ссылка на издание Discogs или его ID</string>
+    <string name="album_discogs_credit">Данные предоставлены Discogs ↗</string>
+    <string name="album_select_edition">Выберите издание</string>
+    <string name="album_change_edition">Сменить издание</string>
+    <string name="album_local_tracks">Другие треки из локальной коллекции</string>
+    <string name="album_no_tracklist">Треклист издания не найден</string>
+    <string name="album_catalog_actions">Действия в каталоге</string>
+    <string name="album_vault_absent">Нет в доступном Vault</string>
+    <string name="album_vault_unknown">Наличие в Vault не подтверждено</string>
     <string name="music_download_track">Скачать трек</string>
     <string name="music_saved_offline">Доступен без интернета</string>
     <string name="music_downloading">Скачивается…</string>
@@ -39,19 +48,26 @@
     <string name="catalog_latest_release">Новый релиз</string>
     <string name="catalog_guest_tracks">С участием</string>
     <string name="catalogue_add_to_playlist">Добавить в плейлист</string>
-    <string name="catalog_popular_tracks">Популярные треки · ListenBrainz</string>
+    <string name="catalog_popular_tracks">Популярные треки</string>
     <string name="catalogue_vault_count">В Vault %1$d из %2$d</string>
     <string name="catalogue_in_vault">В Vault</string>
-    <string name="catalog_download_artist">Загрузить артиста</string>
+    <string name="catalog_download_artist">Загрузить дискографию в Vault</string>
     <string name="catalog_download_release">Загрузить альбом</string>
     <string name="catalog_download_track">Загрузить трек</string>
-    <string name="catalog_download_scope">Включены основные издания и гостевые треки.</string>
-    <string name="catalog_download_alternatives">Включить альтернативные издания</string>
-    <string name="catalog_download_counts">В Vault %1$d · В очереди %2$d · Доступны для загрузки %3$d · Недоступны %4$d</string>
-    <string name="catalog_download_start">Начать загрузку</string>
-    <string name="catalog_download_preview">Рассчитать загрузку</string>
-    <string name="catalog_source_missing">Источник не найден</string>
-    <string name="catalog_match_missing">Недостаточно данных для сопоставления</string>
-    <string name="catalog_track_failed">Ошибка загрузки</string>
+    <string name="catalog_download_library_scope">Выберите исполнителя в каталоге для загрузки дискографии.</string>
+    <string name="catalog_download_vault_complete">Загрузка в Vault завершена</string>
     <string name="catalogue_on_phone">На телефоне</string>
+    <string name="download_wait_network">Ожидание подключения к сети</string>
+    <string name="download_wait_unmetered">Ожидание Wi-Fi или другой сети без тарификации</string>
+    <string name="download_allow_metered">Разрешить загрузки через мобильную сеть</string>
+    <string name="player_find_phone_audio">Найти этот трек на телефоне</string>
+    <string name="download_percent">%1$d%%</string>
+    <string name="download_playlist">Скачать плейлист</string>
+    <string name="download_partial">Сохранено %1$d из %2$d · Повторить</string>
+    <string name="download_saved_count">Сохранено %1$d из %2$d</string>
+    <string name="download_retry_inline">Не удалось загрузить · Повторить</string>
+    <string name="download_bytes_of">%1$s из %2$s</string>
+    <string name="download_catalog_found">Поиск в каталоге · найдено треков: %1$d</string>
+    <string name="download_catalog_checked">Проверено треков: %1$d из %2$d</string>
+    <string name="download_catalog_processed">Обработано треков: %1$d из %2$d</string>
 </resources>

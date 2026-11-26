@@ -12,10 +12,26 @@ from typing import Literal, cast
 from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
+from autplay.domain.featured_artists import featured_names, primary_credit, same_feature_credit
+from autplay.domain.title_edits import (
+    SESSION_LABEL,
+    compact_spelling,
+    edit_parts,
+    edit_title,
+    edition_label,
+    joined_title_matches,
+    session_label,
+)
+from autplay.domain.track_names import performance_title, strip_source_site, strip_video_credit
+
 MetadataValue = str | int | list[str] | None
 MetadataFields = dict[str, MetadataValue]
-MetadataSource = Literal["EMBEDDED", "SOURCE_NATIVE", "MUSICBRAINZ", "USER"]
-TEXT_FIELDS = frozenset({"title", "artist", "album", "album_artist", "label", "country"})
+MetadataSource = Literal[
+    "EMBEDDED", "SOURCE_NATIVE", "MUSICBRAINZ", "USER", "FILENAME", "SOURCE_LABEL"
+]
+TEXT_FIELDS = frozenset(
+    {"title", "artist", "album", "album_artist", "composer", "label", "country"}
+)
 DATE_FIELDS = frozenset({"release_date", "original_release_date", "recording_date"})
 ID_FIELDS = frozenset({"mb_recording_id", "mb_release_id", "mb_release_group_id"})
 NUMBER_FIELDS = frozenset({"track_number", "disc_number"})
@@ -106,7 +122,11 @@ class MetadataDocument:
                 continue
             if evidence.source != "USER" and value is None:
                 continue
-            if fill_only and values.get(key) is not None:
+            if (
+                fill_only
+                and values.get(key) is not None
+                and (old is None or old.source not in {"FILENAME", "SOURCE_LABEL"})
+            ):
                 continue
             values[key] = value
             sources[key] = evidence
@@ -121,6 +141,10 @@ _TITLE_NOISE = frozenset(
     {
         "official video",
         "official music video",
+        "official hd video",
+        "official hd music video",
+        "music video",
+        "mood video",
         "official audio",
         "official lyric video",
         "lyric video",
@@ -157,7 +181,13 @@ _VERSION_MARKERS = {
 
 def lookup_title(value: str, artist: str = "") -> str:
     """Remove only explicit presentation wrappers, never recording version qualifiers."""
-    result = unicodedata.normalize("NFKC", value).strip()
+    value = strip_source_site(value)
+    artist = strip_source_site(artist)
+    result = strip_video_credit(unicodedata.normalize("NFKC", value).strip())
+    result = (
+        re.sub(r"\s*\[(?:official )?music video\]\s*\|\s*GRM Daily\s*$", "", result, flags=re.I)
+        or result
+    )
     # A source may repeat its real credited artist before the title. Never infer
     # an artist from this separator or from an uploader name.
     pieces = re.split(r"\s+[-\u2013\u2014]\s+", result, maxsplit=1)
@@ -169,10 +199,106 @@ def lookup_title(value: str, artist: str = "") -> str:
 
     result = re.sub(r"[\[(]([^\[\]()]+)[\])]", bracket, result)
     # Suffixes must have a separator; a song actually named 'Lyrics' stays intact.
-    pieces = re.split(r"\s+[-|\u2013\u2014]\s+", result)
+    pieces = re.split(r"\s+[-|\u2013\u2014]\s+", performance_title(result.strip()))
     while len(pieces) > 1 and normalized(pieces[-1]) in _TITLE_NOISE:
         pieces.pop()
-    return " ".join(" - ".join(pieces).split())
+    return edit_title(" ".join(" - ".join(pieces).split()) or value.strip())
+
+
+_PERFORMANCE_SUFFIX = re.compile(rf"\s+\((live at [^()\n]{{1,80}}|{SESSION_LABEL})\)$", re.I)
+
+
+def lookup_names(title: str, artist: str) -> tuple[str, str]:
+    artist = strip_source_site(artist)
+    return featured_names(lookup_title(title, artist), artist)
+
+
+def catalogue_names(title: str, artist: str, recording_title: str | None) -> tuple[list[str], str]:
+    """The release track and recording can put the same guest in different fields."""
+    name, credit = lookup_names(title, artist)
+    if not recording_title:
+        return [name], credit
+    other, other_credit = lookup_names(recording_title, artist)
+    original = strip_source_site(artist)
+    if credit == original:
+        credit = other_credit
+    elif other_credit not in {credit, original} and not same_feature_credit(credit, other_credit):
+        return [], ""
+    return [name, other], credit
+
+
+def performance_search_title(title: str) -> str:
+    base, _ = edit_parts(title)
+    return _PERFORMANCE_SUFFIX.sub("", base) or base
+
+
+def catalogue_title_matches(
+    query_title: str, titles: list[str], disambiguation: str | None
+) -> bool:
+    query_edition = _PERFORMANCE_SUFFIX.search(query_title)
+    expected = normalized(query_edition[1]) if query_edition else None
+    evidence = [match[1] for title in titles if (match := _PERFORMANCE_SUFFIX.search(title))]
+    note = (disambiguation or "").strip()
+    note = session_label(note) or note
+    if _PERFORMANCE_SUFFIX.fullmatch(f" ({note})"):
+        evidence.append(note)
+    if any(normalized(edition) != expected for edition in evidence):
+        return False
+    base, edit = edit_parts(query_title)
+    candidates = [edit_parts(title) for title in titles]
+    note_edit = edition_label(note)
+    edits = {value for _, value in candidates if value}
+    if note_edit:
+        edits.add(note_edit)
+    if edits != ({edit} if edit else set()):
+        return False
+    if any(
+        normalized(base) == normalized(other) or joined_title_matches(base, other)
+        for other, _ in candidates
+    ):
+        return True
+    return bool(
+        expected
+        and evidence
+        and any(
+            normalized(title) == normalized(performance_search_title(query_title))
+            for title in titles
+        )
+    )
+
+
+def metadata_search_terms(title: str, artist: str) -> tuple[tuple[str, str], ...]:
+    """Progressively broaden retrieval while leaving the evidence used for matching intact."""
+    title, artist = strip_source_site(title.strip()), strip_source_site(artist.strip())
+    if not title or not artist:
+        return ()
+    original = (title, artist)
+    clean, artist = lookup_names(title, artist)
+    # Keep edition markers for verification but allow catalogue retrieval without a dated
+    # language suffix.
+    search = (
+        re.sub(
+            r"\s+(?:\((?:19|20)[0-9]{2}\)\s*\[[A-Za-z]{2}\]|\((?:uncensored|censored|explicit|clean)\))$",
+            "",
+            clean,
+            flags=re.I,
+        )
+        or clean
+    )
+    search = performance_search_title(edit_parts(search, search=True)[0])
+    words = re.findall(r"[^\W_]+", search)
+    shorter = " ".join(words[:4]) if len(words) > 4 else search
+    terms = [original, (clean, artist), (search, artist)]
+    primary = primary_credit(artist)
+    if primary and primary != artist:
+        terms.append((search, primary))
+    if joined := compact_spelling(search):
+        terms.append((joined, artist))
+    terms.extend(((shorter, artist), (shorter, artist.split()[0])))
+    # Ask the catalog for the spellings used by this artist when no word boundaries are known.
+    if search.isalpha() and len(search) >= 12:
+        terms.append(("", artist))
+    return tuple(dict.fromkeys(terms))
 
 
 def version_markers(value: str) -> frozenset[str]:
@@ -445,16 +571,21 @@ class MetadataCandidate:
         title, artist = self.fields.get("title"), self.fields.get("artist")
         if not isinstance(title, str) or not isinstance(artist, str):
             return False
-        if not normalized(query.title) or not normalized(query.artist):
+        query_title, query_artist = lookup_names(query.title, query.artist)
+        if not normalized(query_title) or not normalized(query_artist):
             return False
-        query_title = lookup_title(query.title, query.artist)
-        candidate_title = lookup_title(title, artist)
+        titles, candidate_artist = catalogue_names(
+            title, artist, self.recording_title if self.release_hydrated else None
+        )
+        if not titles:
+            return False
+        note = self.recording_disambiguation or ""
         if version_markers(query_title) != version_markers(
-            candidate_title
+            " ".join(titles)
             + " "
-            + (self.recording_disambiguation or "")
+            + (edition_label(note) or note)
             + " "
-            + (self.recording_title or "")
+            + ("" if self.release_hydrated else self.recording_title or "")
             + " "
             + " ".join(self.release_secondary_types)
         ):
@@ -465,10 +596,10 @@ class MetadataCandidate:
             return False
         if self.release_status is not None and normalized(self.release_status) != "official":
             return False
-        titles = {normalized(candidate_title)}
-        if self.release_hydrated and self.recording_title:
-            titles.add(normalized(lookup_title(self.recording_title, artist)))
-        if normalized(query_title) not in titles or normalized(artist) != normalized(query.artist):
+        if not (
+            normalized(candidate_artist) == normalized(query_artist)
+            or same_feature_credit(candidate_artist, query_artist)
+        ) or not catalogue_title_matches(query_title, titles, self.recording_disambiguation):
             return False
         if query.album and normalized(str(self.fields.get("album") or "")) != normalized(
             query.album

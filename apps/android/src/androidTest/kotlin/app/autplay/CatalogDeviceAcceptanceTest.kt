@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import app.autplay.ui.AutPlayTheme
@@ -113,7 +115,7 @@ class CatalogDeviceAcceptanceTest {
     }
     private fun tapTag(tag: String) = node(hasTestTag(tag)).performClick()
     private fun action(label: Int) = node(hasText(strings.getString(label)) and hasClickAction()).performClick()
-    private fun library() = action(R.string.nav_library)
+    private fun library() = node(androidx.compose.ui.test.hasContentDescription(strings.getString(R.string.nav_library)) and hasClickAction()).performClick()
     private fun tile(tab: String, id: String) {
         node(hasTestTag("library-sections")).performScrollToNode(hasTestTag("library-tab-$tab"))
         tapTag("library-tab-$tab")
@@ -246,7 +248,7 @@ class CatalogDeviceAcceptanceTest {
         }
     }
 
-    private fun catalogue(edition: Boolean): ActivityScenario<ComponentActivity> {
+    private fun catalogue(edition: Boolean, selectArtistForDownload: Boolean = false): ActivityScenario<ComponentActivity> {
         val activity = ActivityScenario.launch(ComponentActivity::class.java)
         activity.onActivity { host ->
             host.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -257,6 +259,7 @@ class CatalogDeviceAcceptanceTest {
                         var selected by remember { mutableStateOf<String?>(null) }
                         Column(Modifier.verticalScroll(rememberScrollState())) {
                             InternetMetadataDiscoverySection("QA Quartet", LibrarySearchKind.Artist, 1,
+                                selectArtistForDownload = selectArtistForDownload,
                                 onPlaylistTrack = { selected = it },
                                 initialTarget = if (edition) InternetMetadataBrowseTarget(
                                     InternetMetadataDiscoveryEntity.RELEASE, value("release")) else null)
@@ -274,16 +277,91 @@ class CatalogDeviceAcceptanceTest {
         return activity
     }
 
+    @Test fun artistDiscographyCompletesInVaultAndSyncsTrackMetadata(): Unit = runBlocking {
+        setup(true)
+        val artist = value("artist")
+        val target = app.autplay.ui.core.DetailTarget(app.autplay.ui.core.DetailKind.CatalogArtistTracks, artist, "AutPlay verification")
+        ActivityScenario.launch(ComponentActivity::class.java).use { activity ->
+            activity.onActivity { host -> host.setContent {
+                AutPlayTheme { app.autplay.ui.CoreProductDetailScreen(app.autplay.ui.CoreProductDetailUiState(target)) }
+            } }
+            tapTag("download-artist-$artist")
+            node(androidx.compose.ui.test.hasContentDescription(strings.getString(R.string.catalog_download_vault_complete), substring = true)).assertIsDisplayed()
+        }
+        assertTrue(db.localAudioDao().observeDownloadIntentsForProfile(value("profile"), 10).first().isEmpty())
+        assertTrue(AutPlayRuntime.syncCoordinator(context, binding).run(binding))
+        val localId = db.libraryDao().trackRefByServerId(value("profile"), value("ref"))!!.localUserTrackRefId
+        val metadata = requireNotNull(db.trackMetadataDao().get(value("profile"), localId))
+        val view = Json.parseToJsonElement(metadata.payloadJson).jsonObject
+        val measured = view.getValue("loudness_v1").jsonObject
+        assertEquals(4.25, measured.getValue("gain_db").jsonPrimitive.double, .1)
+        assertEquals(value("variant"), measured.getValue("audio_variant_id").jsonPrimitive.content)
+        val api = AutPlayRuntime.serverFeatures(context, binding)
+        app.autplay.application.library.TrackMetadataRepository(context).loadForPlayback(value("profile"), localId,
+            api::trackMetadata, api::metadataArtwork)
+        val art = requireNotNull(db.trackMetadataDao().artwork(value("profile"), requireNotNull(metadata.artworkSha256)))
+        assertNotNull(android.graphics.BitmapFactory.decodeFile(art.filePath))
+        ActivityScenario.launch(ComponentActivity::class.java).use { activity ->
+            activity.onActivity { host -> host.setContent { AutPlayTheme {
+                app.autplay.ui.ArtistHeader("AutPlay verification", artworkTrackId = localId, trackCount = 1)
+            } } }
+            node(hasTestTag("artist-avatar")).assertIsDisplayed()
+            if (InstrumentationRegistry.getArguments().getString("captureArtist") == "true") {
+                val header = compose.onNodeWithTag("artist-header")
+                node(hasTestTag("artist-banner-art")).assertExists()
+                val bitmap = header.captureToImage()
+                File(context.filesDir, "verified-artist.png").outputStream().use {
+                    bitmap.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                }
+            }
+        }
+        val detail = requireNotNull(app.autplay.application.library.CoreProductRepository(db).trackDetail(localId, value("profile")))
+        ActivityScenario.launch(ComponentActivity::class.java).use { activity ->
+            activity.onActivity { host -> host.setContent { AutPlayTheme {
+                app.autplay.ui.CoreProductDetailScreen(app.autplay.ui.CoreProductDetailUiState(
+                    app.autplay.ui.core.DetailTarget(app.autplay.ui.core.DetailKind.Track, localId), track = detail))
+            } } }
+            node(hasText(value("expectedTitle"))).assertIsDisplayed()
+            node(hasText("Embedded album")).assertExists()
+            compose.onNodeWithTag("collection-details").performScrollToNode(hasText("2001-04", substring = true))
+            node(hasText("2001-04", substring = true)).assertIsDisplayed()
+            node(hasText(strings.getString(R.string.metadata_track_number) + ": 3", substring = true)).assertExists()
+        }
+    }
+
+    @Test fun albumAndTrackUseEditionCoverWhenLocalArtworkIsMissing(): Unit = runBlocking {
+        setup(true)
+        val release = java.util.UUID.randomUUID().toString()
+        val color = android.graphics.Color.rgb(34, 119, 85)
+        val directory = File(context.cacheDir, "catalog-art").apply { mkdirs() }
+        val file = File(directory, release)
+        val bitmap = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(color)
+        file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        try {
+            ActivityScenario.launch(ComponentActivity::class.java).use { activity ->
+                activity.onActivity { host -> host.setContent { AutPlayTheme { Column {
+                    app.autplay.ui.CollectionDetailHeader("Album", null, null, 1, "missing", null, release)
+                    app.autplay.ui.AutPlayArtwork("Track", Modifier.testTag("track-cover"), trackId = "missing", catalogCoverId = release)
+                } } } }
+                for (tag in listOf("collection-artwork", "track-cover")) {
+                    val art = node(hasTestTag(tag))
+                    compose.waitUntil(10_000) {
+                        val image = art.captureToImage().asAndroidBitmap()
+                        image.getPixel(image.width / 2, image.height / 2) == color
+                    }
+                }
+            }
+        } finally { file.delete() }
+    }
+
     @Test fun verifyDefaultArtistDownloadScope(): Unit = runBlocking {
         setup(true)
-        catalogue(false).use {
+        catalogue(false, selectArtistForDownload = true).use {
             val artist = hasTestTag("catalogue-card-musicbrainz:artist:${value("artist")}")
-            node(hasText(strings.getString(R.string.library_section_albums)) and hasAnyAncestor(artist)).performClick()
-            action(R.string.catalog_download_artist)
-            node(hasText(strings.getString(R.string.catalog_download_scope))).assertIsDisplayed()
-            node(isToggleable()).assertIsOff()
-            action(R.string.catalog_download_preview)
-            node(hasText(strings.getString(R.string.catalog_download_counts, 1, 0, 0, 1))).assertExists()
+            node(hasTestTag("download-artist-${value("artist")}") and hasAnyAncestor(artist)).performClick()
+            compose.onAllNodes(isToggleable()).assertCountEquals(0)
+            node(hasText(strings.getString(R.string.download_partial, 1, 2))).assertExists()
         }
     }
 
@@ -320,11 +398,8 @@ class CatalogDeviceAcceptanceTest {
     @Test fun startExplicitDownload(): Unit = runBlocking {
         catalogue(true).use {
             node(hasText("QA Tone")).assertExists()
-            action(R.string.catalog_download_release)
-            action(R.string.catalog_download_preview)
-            node(hasText(strings.getString(R.string.catalog_source_missing), substring = true)).assertExists()
-            action(R.string.catalog_download_start)
-            node(hasText(strings.getString(R.string.catalog_download_counts, 0, 1, 0, 1))).assertExists()
+            tapTag("download-release-${value("release")}")
+            node(hasText(strings.getString(R.string.download_catalog_processed, 1, 2))).assertExists()
         }
     }
 
@@ -347,11 +422,9 @@ class CatalogDeviceAcceptanceTest {
     @Test fun repeatExplicitDownload(): Unit = runBlocking {
         catalogue(true).use {
             node(hasText("QA Tone")).assertExists()
-            action(R.string.catalog_download_release)
-            action(R.string.catalog_download_preview)
-            node(hasText(strings.getString(R.string.catalog_download_counts, 1, 0, 0, 1))).assertExists()
-            action(R.string.catalog_download_start)
-            node(hasText(strings.getString(R.string.catalog_download_preview)) and hasClickAction()).assertExists()
+            node(hasText(strings.getString(R.string.download_partial, 1, 2))).assertExists()
+            tapTag("download-release-${value("release")}")
+            node(hasText(strings.getString(R.string.download_partial, 1, 2))).assertExists()
         }
     }
 

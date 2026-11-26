@@ -1,5 +1,7 @@
 package app.autplay.desktop.presentation
 
+import app.autplay.application.library.WelcomeArtist
+import app.autplay.application.library.ExternalCollection
 import app.autplay.application.recommendation.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.update
@@ -30,7 +32,8 @@ internal data class SavedHome(val stale: Boolean, val items: List<SavedHomeTrack
 internal data class VaultPage(val items: List<VaultHit>, val next: String?)
 internal data class WaveCalendar(val id: AccountUuid = AccountUuid.random(), val start: LocalDateTime = LocalDateTime.now())
 internal data class ArtistCatalogue(val mbid: AccountUuid, val counts: Map<String, Long>)
-internal data class MusicBrowse(val query: String, val kind: String, val entity: AccountUuid? = null, val releases: Boolean = false)
+internal data class MusicBrowse(val query: String, val kind: String, val entity: AccountUuid? = null,
+    val releases: Boolean = false, val albumArtist: String? = null)
 internal sealed interface PlaylistTrackTarget {
     data class Local(val id: AccountUuid) : PlaylistTrackTarget
     data class Vault(val hit: VaultHit) : PlaylistTrackTarget
@@ -50,6 +53,10 @@ internal class DesktopOnlineMusic(
     private val download: suspend (AccountLease, AccountUuid) -> Unit,
 ) {
     private fun requireOwner(lease: AccountLease) = check(current() == lease) { "ACCOUNT_SCOPE_CHANGED" }
+
+    suspend fun albumTracklist(lease: AccountLease, title: String?, artist: String?, mbid: AccountUuid?,
+        discogsId: String?, year: String?) = app.autplay.application.server.decodeAlbumTracklist(
+        request(lease, DomainRoute.AlbumTracklist(title, artist, mbid, discogsId, year)))
 
     private class CalendarUnsupported : Exception()
 
@@ -567,6 +574,37 @@ internal class DesktopOnlineMusic(
         val matches = catalog.resolveMusicTargets(lease, ids, recording)
         return ids.mapNotNull(matches::get)
     }
+
+    suspend fun artistWelcomePending(lease: AccountLease): Boolean =
+        request(lease, DomainRoute.ArtistWelcome()).getValue("pending").jsonPrimitive.boolean
+
+    suspend fun welcomeArtists(lease: AccountLease, parent: String?, query: String, seen: List<String>): List<WelcomeArtist> =
+        WelcomeArtist.decode(request(lease, DomainRoute.BrowseArtists(), WelcomeArtist.browse(parent, query, seen)))
+
+    suspend fun finishArtistWelcome(lease: AccountLease, selected: List<String>) {
+        request(lease, DomainRoute.FinishArtistWelcome(), WelcomeArtist.choices(selected))
+    }
+
+    suspend fun startCollection(lease: AccountLease, link: String, favorites: Boolean, operation: String, copy: Boolean): ExternalCollection =
+        ExternalCollection.decode(request(lease, DomainRoute.StartCollection(), ExternalCollection.startBody(link, favorites, operation, copy)))
+
+    suspend fun resumeCollection(lease: AccountLease, operation: String): ExternalCollection =
+        ExternalCollection.decode(request(lease, DomainRoute.ResumeCollection(AccountUuid(operation))))
+
+    suspend fun confirmCollection(lease: AccountLease, preview: ExternalCollection): ExternalCollection =
+        ExternalCollection.decode(request(lease, DomainRoute.ConfirmCollection(AccountUuid(preview.operation)),
+            buildJsonObject { put("revision", preview.revision); preview.selectionKey?.let { put("selection_key", it) } }))
+
+    suspend fun collectionPage(lease: AccountLease, operation: String, offset: Int): ExternalCollection =
+        ExternalCollection.decode(request(lease, DomainRoute.CollectionPage(AccountUuid(operation), offset)))
+
+    suspend fun cancelCollection(lease: AccountLease, operation: String): ExternalCollection =
+        ExternalCollection.decode(request(lease, DomainRoute.CancelCollection(AccountUuid(operation))))
+
+    suspend fun recentCollections(lease: AccountLease): List<Pair<String, String>> =
+        request(lease, DomainRoute.RecentCollections()).getValue("imports").jsonArray.map { it.jsonObject.run {
+            getValue("operation_id").jsonPrimitive.content to getValue("name").jsonPrimitive.content
+        } }
 
     suspend fun publish(lease: AccountLease, playlist: DesktopPlaylist, library: DesktopLibrarySnapshot): String {
         val witness = services.session.capture(lease)

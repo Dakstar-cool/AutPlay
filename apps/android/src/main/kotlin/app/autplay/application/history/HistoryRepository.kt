@@ -1,6 +1,8 @@
 package app.autplay.application.history
 
 import app.autplay.application.importing.LEGACY_PROFILE_ID
+import app.autplay.application.library.decoded
+import app.autplay.application.library.names
 import app.autplay.data.local.AutPlayDatabase
 
 data class HistoryCursor(val startedAtMs: Long, val listeningEventId: String)
@@ -40,13 +42,18 @@ class HistoryRepository(private val database: AutPlayDatabase) {
         val next = pageRows.lastOrNull()?.takeIf { rows.size > boundedSize }?.let {
             HistoryCursor(it.startedAtMs, it.listeningEventId)
         }
+        val metadata = pageRows.map { it.localUserTrackRefId }.distinct().let { ids ->
+            if (ids.isEmpty()) emptyMap() else database.trackMetadataDao().forTracks(owner, ids)
+                .associateBy { it.localUserTrackRefId }
+        }
         return HistoryPage(
             items = pageRows.map {
+                val names = metadata[it.localUserTrackRefId]?.decoded().names(it.title, it.artist)
                 HistoryItem(
                     listeningEventId = it.listeningEventId,
                     localUserTrackRefId = it.localUserTrackRefId,
-                    title = it.title,
-                    artist = it.artist,
+                    title = names.title,
+                    artist = names.artist,
                     startedAtMs = it.startedAtMs,
                     playedMs = it.playedMs,
                     trackDurationMs = it.trackDurationMs,

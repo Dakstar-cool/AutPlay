@@ -90,6 +90,8 @@ class SnapshotTrack:
     release_date_ordinal: int | None
     owner_identity_decision_id: UUID | None = None
     verified_audio_variant_id: UUID | None = None
+    starter_artist_weight: int = 0
+    artist_acts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +104,7 @@ class RecommendationInputSnapshot:
     policy_version: str = "1"
 
     def __post_init__(self) -> None:
-        if self.policy_version not in {"1", "2"}:
+        if self.policy_version not in {"1", "2", "3"}:
             raise ValueError("unsupported recommendation snapshot policy")
         recording_ids = tuple(track.recording_id for track in self.tracks)
         if len(recording_ids) != len(set(recording_ids)):

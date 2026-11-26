@@ -7,12 +7,13 @@ from pathlib import Path
 from autplay.adapters.media.tools import SubprocessExecutableRunner
 from autplay.domain.track_metadata import MetadataFields, validate_fields
 from autplay.domain.vault import MediaValidationError
-from autplay.ports.track_metadata import EmbeddedMetadata, MetadataProviderError
+from autplay.ports.track_metadata import EmbeddedMetadata, MetadataProviderError, TrackLoudness
 from autplay.ports.vault import ExecutableRunner
 
 _TAG_FIELDS = {
     "title": "title",
     "artist": "artist",
+    "composer": "composer",
     "album": "album",
     "album_artist": "album_artist",
     "albumartist": "album_artist",
@@ -54,6 +55,21 @@ def fields_from_tags(tags: dict[str, object]) -> MetadataFields:
     return result
 
 
+def _cover_priority(stream: dict[str, object]) -> int:
+    tags = stream.get("tags")
+    if isinstance(tags, dict):
+        labels = {
+            str(v).strip().casefold()
+            for k, v in tags.items()
+            if k.casefold() in {"comment", "title"}
+        }
+        if labels & {"cover (front)", "front cover", "front"}:
+            return 0
+        if labels & {"cover (back)", "back cover", "back"}:
+            return 2
+    return 1
+
+
 class FfmpegMetadataReader:
     def __init__(self, runner: ExecutableRunner) -> None:
         self.runner = runner
@@ -84,20 +100,20 @@ class FfmpegMetadataReader:
             for stream in streams:
                 if stream.get("codec_type") == "audio":
                     tags.update(stream.get("tags", {}))
-            picture = next(
-                (
-                    s
-                    for s in streams
-                    if s.get("disposition", {}).get("attached_pic") == 1
-                    and 0 < s.get("width", 0) <= 4096
-                    and 0 < s.get("height", 0) <= 4096
-                ),
-                None,
-            )
-            try:
-                art = self._jpeg(path, int(picture["index"])) if picture else None
-            except MetadataProviderError, MediaValidationError:
-                art = None
+            pictures = [
+                stream
+                for stream in streams
+                if stream.get("disposition", {}).get("attached_pic") == 1
+                and 0 < stream.get("width", 0) <= 4096
+                and 0 < stream.get("height", 0) <= 4096
+            ]
+            art = None
+            for picture in sorted(pictures, key=_cover_priority)[:2]:
+                try:
+                    art = self._jpeg(path, int(picture["index"]))
+                    break
+                except MetadataProviderError, MediaValidationError:
+                    continue
             duration_ms = None
             try:
                 duration = Decimal(str(data.get("format", {}).get("duration"))) * 1000
@@ -105,11 +121,52 @@ class FfmpegMetadataReader:
                     duration_ms = int(duration)
             except InvalidOperation, ValueError, TypeError:
                 pass
-            return EmbeddedMetadata(fields_from_tags(tags), art, duration_ms)
+            # The player can switch between streams in a multi-audio container.
+            audio_count = sum(stream.get("codec_type") == "audio" for stream in streams)
+            loudness = self._measure_loudness(path) if audio_count == 1 else None
+            return EmbeddedMetadata(fields_from_tags(tags), art, duration_ms, loudness)
         except (ValueError, TypeError, KeyError, AttributeError) as error:
             raise MetadataProviderError("metadata_tags_invalid", retryable=False) from error
 
-    def normalize_artwork(self, payload: bytes) -> bytes:
+    def _measure_loudness(self, path: Path) -> TrackLoudness | None:
+        # First-pass input values describe the untouched audio. The null muxer discards output.
+        try:
+            scan = self.runner.run(
+                [
+                    "ffmpeg",
+                    "-nostdin",
+                    "-hide_banner",
+                    "-nostats",
+                    "-protocol_whitelist",
+                    "file,pipe",
+                    "-i",
+                    str(path),
+                    "-map",
+                    "0:a:0",
+                    "-map_metadata",
+                    "-1",
+                    "-af",
+                    "loudnorm=I=-18:TP=-1:LRA=11:print_format=json",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                timeout_seconds=120,
+                max_output_bytes=131072,
+            )
+            if scan.returncode:
+                return None
+            # Some FFmpeg versions append muxer statistics after the filter summary.
+            start = scan.stderr.rindex(b"\n{") + 1
+            end = scan.stderr.index(b"}", start) + 1
+            report = json.loads(scan.stderr[start:end])
+            gain = round(-18.0 - float(report["input_i"]), 2)
+            peak = 10 ** (float(report["input_tp"]) / 20.0)
+            return TrackLoudness(gain, peak)
+        except MediaValidationError, ValueError, OverflowError, TypeError, KeyError:
+            return None
+
+    def normalize_artwork(self, payload: bytes, *, catalog_cover: bool = False) -> bytes:
         if not 1 <= len(payload) <= 4194304:
             raise MetadataProviderError("metadata_artwork_size", retryable=False)
         if not isinstance(self.runner, SubprocessExecutableRunner):
@@ -139,6 +196,10 @@ class FfmpegMetadataReader:
                 or not all(0 < streams[0][axis] <= 4096 for axis in ("width", "height"))
             ):
                 raise ValueError("dimensions")
+            if catalog_cover:
+                width, height = streams[0]["width"], streams[0]["height"]
+                if min(width, height) < 200 or max(width, height) > 1.25 * min(width, height):
+                    raise ValueError("cover dimensions")
         except (ValueError, TypeError, KeyError) as error:
             raise MetadataProviderError("metadata_artwork_invalid", retryable=False) from error
         result = self.runner.run_input(

@@ -14,7 +14,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -24,6 +23,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -199,7 +200,7 @@ internal fun DesktopSettingsControls(
     onSessionLanguage: (DesktopLanguage) -> Unit,
     onSessionTheme: (DesktopThemeMode) -> Unit,
     modifier: Modifier = Modifier,
-    transferOnly: Boolean = false,
+    page: DesktopSettingsPage,
 ): Unit {
     val currentPreferences by rememberUpdatedState(preferences)
     val currentTransfer by rememberUpdatedState(transfer)
@@ -220,16 +221,16 @@ internal fun DesktopSettingsControls(
         latestScope = { currentSmoothScope }, latestOwner = { currentCallbacks }, latestTarget = { currentSmoothTarget },
     )
     Surface(modifier, color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.large) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+        Column(Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text((if (preferences == null) DesktopText.SessionSettings else DesktopText.SavedSettings).inLanguage(language))
+            if (preferences == null) Text(DesktopText.SessionSettings.inLanguage(language))
             if (preferences?.writable == false) SettingsStatus(DesktopText.SettingsReadOnly, language, error = true)
             preferences?.errorCode?.let { SettingsStatus(desktopSettingsErrorText(it), language, error = true) }
             if (stored != null && desktopSettingsHaveUnsupportedValues(stored)) {
                 SettingsStatus(DesktopText.SettingsUnsupportedValues, language, error = false)
             }
-            if (!transferOnly) {
-                Text(DesktopText.Appearance.inLanguage(language), style = MaterialTheme.typography.titleMedium)
+            if (page == DesktopSettingsPage.Appearance) {
+                Text(if (language == DesktopLanguage.Russian) "Тема" else "Theme", style = MaterialTheme.typography.titleMedium)
                 SettingsOptions {
                     DesktopThemeMode.entries.forEach { mode ->
                         FilterChip(selected = if (stored == null) themeMode == mode else stored.appearanceMode == mode.settingsValue,
@@ -261,22 +262,19 @@ internal fun DesktopSettingsControls(
                             }, label = { Text(if (option == DesktopLanguage.Russian) "Русский" else "English") })
                     }
                 }
-                if (stored != null) {
-                    Row(Modifier.fillMaxWidth().toggleable(value = stored.smoothTrackTransitions, enabled = writeEnabled,
-                        role = Role.Switch, onValueChange = changeSmoothTransitions).padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(DesktopText.SmoothTransitions.inLanguage(language), style = MaterialTheme.typography.titleMedium)
-                            Text(DesktopText.SmoothTransitionsHint.inLanguage(language), style = MaterialTheme.typography.bodySmall)
-                        }
-                        Switch(checked = stored.smoothTrackTransitions, onCheckedChange = null, enabled = writeEnabled)
+            }
+            if (page == DesktopSettingsPage.Music && stored != null) {
+                Row(Modifier.fillMaxWidth().toggleable(value = stored.smoothTrackTransitions, enabled = writeEnabled,
+                    role = Role.Switch, onValueChange = changeSmoothTransitions).padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(DesktopText.SmoothTransitions.inLanguage(language), style = MaterialTheme.typography.titleMedium)
+                        Text(DesktopText.SmoothTransitionsHint.inLanguage(language), style = MaterialTheme.typography.bodySmall)
                     }
-                    HorizontalDivider()
+                    Switch(checked = stored.smoothTrackTransitions, onCheckedChange = null, enabled = writeEnabled)
                 }
             }
-            if (transferOnly && stored != null) {
-                Text(DesktopText.RetainedSettings.inLanguage(language))
-                desktopRetainedSettings(stored, language).forEach { (field, value) -> Text("${field.inLanguage(language)}: $value") }
+            if (page == DesktopSettingsPage.Application && stored != null) {
                 SettingsOptions {
                     OutlinedButton(enabled = writeEnabled && transfer.previewId == null, onClick = {
                         if (canWrite() && currentTransfer.previewId == null && currentPreferences != null) currentCallbacks.onImport()
@@ -295,10 +293,25 @@ internal fun DesktopSettingsControls(
                 }
                 transfer.errorCode?.let { SettingsStatus(desktopSettingsErrorText(it), language, error = true) }
                 transfer.messageCode?.let { SettingsStatus(desktopSettingsMessageText(it), language, error = false) }
+                var showRetained by remember { mutableStateOf(false) }
+                TextButton(onClick = { showRetained = !showRetained }) {
+                    Text(if (language == DesktopLanguage.Russian) "Параметры для переноса" else "Settings kept for transfer")
+                }
+                if (showRetained) {
+                    Text(DesktopText.RetainedSettings.inLanguage(language))
+                    desktopRetainedSettings(stored, language).forEach { (field, value) -> Text("${field.inLanguage(language)}: $value") }
+                }
             }
         }
     }
+}
 
+@Composable
+internal fun DesktopSettingsImportPreview(language: DesktopLanguage, preferences: DesktopPreferencesState?,
+    transfer: DesktopSettingsTransferState, callbacks: DesktopSettingsCallbacks): Unit {
+    val currentPreferences by rememberUpdatedState(preferences)
+    val currentTransfer by rememberUpdatedState(transfer)
+    val currentCallbacks by rememberDesktopBrowseReference(callbacks)
     val preview = transfer.preview ?: return
     val id = transfer.previewId ?: return
     if (preferences == null) return

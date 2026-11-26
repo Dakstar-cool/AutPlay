@@ -270,7 +270,7 @@ public fun AutPlayDesktopShell(
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(section.label(language), style = MaterialTheme.typography.headlineLarge)
-                                if (onOpenAccount != null) OutlinedButton(
+                                if (onOpenAccount != null && section != DesktopSection.Settings) OutlinedButton(
                                     enabled = !currentLifecycleState.closing,
                                     onClick = {
                                         if (isNavigationCurrent() && !currentLifecycleState.closing) currentOpenAccount?.invoke()
@@ -417,37 +417,37 @@ public fun AutPlayDesktopShell(
                                 DesktopSection.History -> MutedText(DesktopText.EmptyHistory.inLanguage(language))
                                 DesktopSection.Settings -> {
                                     val ru = language == DesktopLanguage.Russian
-                                    var settingsPage by remember { mutableStateOf(0) }
-                                    val pages = if (ru) listOf("Оформление", "Музыка", "Профиль", "Приложение")
-                                        else listOf("Appearance", "Music", "Profile", "Application")
-                                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        pages.forEachIndexed { index, label ->
-                                            FilterChip(selected = settingsPage == index, onClick = { settingsPage = index }, label = { Text(label) })
+                                    DesktopSettingsMenu(language, themeMode,
+                                        account = onOpenAccount?.let { { if (isNavigationCurrent() && !currentLifecycleState.closing) currentOpenAccount?.invoke() } },
+                                        showMusic = preferencesState != null || onOpenDownloads != null || (sourceAccessState != null && sourceAccessActions != null),
+                                        showApplication = preferencesState != null || currentLifecycleState.available,
+                                        transferBusy = preferencesTransfer.busy, modifier = Modifier.weight(1f).fillMaxWidth()) { page ->
+                                        if (page == DesktopSettingsPage.Appearance || preferencesState != null) {
+                                            DesktopSettingsControls(language, themeMode, accentPalette, preferencesState, preferencesTransfer,
+                                                preferencesCallbacks, onLanguageChange, onThemeChange, page = page)
                                         }
-                                    }
-                                    if (settingsPage == 2 && onOpenAccount != null) OutlinedButton(onClick = onOpenAccount) {
-                                        Text(if (ru) "Открыть аккаунты" else "Open accounts")
-                                    }
-                                    if (settingsPage == 1 && onOpenDownloads != null) OutlinedButton(onClick = onOpenDownloads) {
-                                        Text(if (ru) "Загрузки" else "Downloads")
-                                    }
-                                    if (settingsPage == 1 && sourceAccessState != null && sourceAccessActions != null) {
-                                        if (sourceAccessState.fenced && !currentLifecycleState.closing && onResumeSourceAccess != null) {
-                                            OutlinedButton(onClick = {
-                                                if (isNavigationCurrent() && !currentLifecycleState.closing)
-                                                    onResumeSourceAccess(sourceAccessState)
-                                            }) {
-                                                Text(if (language == DesktopLanguage.Russian) "Возобновить доступ к источникам" else "Resume source access")
+                                        if (page == DesktopSettingsPage.Music) {
+                                            if (onOpenDownloads != null) OutlinedButton(enabled = !currentLifecycleState.closing, onClick = {
+                                                if (isNavigationCurrent() && !currentLifecycleState.closing) onOpenDownloads()
+                                            }) { Text(if (ru) "Открыть загрузки" else "Open downloads") }
+                                            if (sourceAccessState != null && sourceAccessActions != null) {
+                                                var sourcesOpen by remember { mutableStateOf(false) }
+                                                TextButton(onClick = { sourcesOpen = !sourcesOpen }) { Text(if (ru) "Папки с музыкой" else "Music folders") }
+                                                if (sourcesOpen || sourceAccessState.busy || sourceAccessState.fenced || sourceAccessState.errorCode != null) {
+                                                    if (sourceAccessState.fenced && !currentLifecycleState.closing && onResumeSourceAccess != null) {
+                                                        OutlinedButton(onClick = {
+                                                            if (isNavigationCurrent() && !currentLifecycleState.closing) onResumeSourceAccess(sourceAccessState)
+                                                        }) { Text(if (ru) "Возобновить доступ к источникам" else "Resume source access") }
+                                                    }
+                                                    DesktopSourceAccessControls(sourceAccessState, sourceAccessActions, language,
+                                                        isNavigationCurrent = { isNavigationCurrent() && !currentLifecycleState.closing })
+                                                }
                                             }
                                         }
-                                        DesktopSourceAccessControls(sourceAccessState, sourceAccessActions, language,
-                                            isNavigationCurrent = { isNavigationCurrent() && !currentLifecycleState.closing })
+                                        if (page == DesktopSettingsPage.Application) DesktopLifecycleControls(currentLifecycleState,
+                                            currentLifecycleCallbacks, language, navigationAtInput, isNavigationCurrent)
                                     }
-                                    if (settingsPage == 3) DesktopLifecycleControls(currentLifecycleState, currentLifecycleCallbacks, language,
-                                        navigationAtInput, isNavigationCurrent)
-                                    if (settingsPage == 0 || settingsPage == 3) DesktopSettingsControls(language, themeMode, accentPalette, preferencesState,
-                                        preferencesTransfer, preferencesCallbacks, onLanguageChange, onThemeChange,
-                                        modifier = Modifier.weight(1f).fillMaxWidth(), transferOnly = settingsPage == 3)
+                                    DesktopSettingsImportPreview(language, preferencesState, preferencesTransfer, preferencesCallbacks)
                                 }
                             }
                         }

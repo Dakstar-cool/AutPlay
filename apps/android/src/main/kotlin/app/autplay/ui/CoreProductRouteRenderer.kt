@@ -24,7 +24,6 @@ internal data class CoreProductRouteActions(
     val retryHome: () -> Unit,
     val resumeHomeQueue: (String) -> Unit,
     val continueHomeQueue: () -> Unit = {},
-    val openHomePlaylist: (String) -> Unit,
     val openOffline: () -> Unit,
     val openProblems: () -> Unit,
     val changeQuery: (String) -> Unit,
@@ -58,7 +57,11 @@ internal data class CoreProductRouteActions(
     val playWheelMix: (HomeWheelMix) -> Unit = {},
     val startMyWave: () -> Unit = {},
     val myWaveAllowed: Boolean = true,
+    val searchPersonal: ((LibrarySection, LibraryFilter, String) -> kotlinx.coroutines.flow.Flow<LibraryScreenUiState>)? = null,
+    val openHeroArtist: (() -> Unit)? = null,
     val playReleaseEntry: ((String) -> Unit)? = null,
+    val seekHome: (Long) -> Unit = {},
+    val observeHomeTimeline: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -98,16 +101,18 @@ internal fun CoreProductRouteRenderer(
             onContinueListening = actions.continueHomeQueue,
             onStartMyWave = actions.startMyWave,
             onPlayWheelMix = actions.playWheelMix,
+            onSeek = actions.seekHome,
+            onTimelineObserving = actions.observeHomeTimeline,
             myWaveAllowed = actions.myWaveAllowed,
             onAddLocal = actions.addLocal,
             importingLocalTrack = libraryState.importingLocalTrack,
-            onOpenPlaylist = actions.openHomePlaylist,
             onOpenOffline = actions.openOffline,
             onOpenProblems = actions.openProblems,
             playerState = playerState,
             currentTrackRefId = currentTrackRefId,
             currentTrackLiked = currentTrackLiked,
             onOpenPlayer = onOpenNowPlaying,
+            onOpenHeroArtist = actions.openHeroArtist,
             onTogglePlayPause = onTogglePlayPause,
             onLikeHeroTrack = actions.likeTrack,
             onPreviousTrack = onPreviousTrack,
@@ -120,6 +125,8 @@ internal fun CoreProductRouteRenderer(
             contentPadding = contentPadding,
             onQueryChange = actions.changeQuery,
             onSearchKindChange = actions.changeSearchKind,
+            onOpenCatalog = actions.openDetail,
+            onOpenArtist = { actions.openDetail(DetailTarget(DetailKind.Artist, it)) },
             onSearch = actions.submitSearch,
             onPlay = actions.playSearchResult,
             onPlayVault = actions.playVaultSearchResult,
@@ -158,6 +165,7 @@ internal fun CoreProductRouteRenderer(
             )
         } else {
             LibraryProductScreen(
+                searchPersonal = actions.searchPersonal,
                 state = libraryState.copy(tracks = libraryState.tracks.map { track ->
                     track.copy(selected = track.id == currentTrackRefId)
                 }),

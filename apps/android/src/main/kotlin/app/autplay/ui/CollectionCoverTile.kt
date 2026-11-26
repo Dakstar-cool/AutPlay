@@ -1,5 +1,7 @@
 package app.autplay.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,11 +26,12 @@ internal fun CollectionCoverTile(
     catalogCoverId: String? = null,
     onClick: () -> Unit,
 ) {
-    Surface(onClick = onClick, enabled = enabled, modifier = modifier, shape = MaterialTheme.shapes.medium, color = AutPlayTokens.colors.raisedSurface) {
+    Surface(onClick = onClick, enabled = enabled, modifier = modifier, shape = MaterialTheme.shapes.large,
+        color = AutPlayTokens.colors.raisedSurface, border = BorderStroke(1.dp, AutPlayTokens.colors.border.copy(alpha = .45f))) {
         Column {
             AutPlayArtwork(title, Modifier.fillMaxWidth().aspectRatio(1f).clearAndSetSemantics {}, trackId = artworkTrackId,
-                painter = if (artworkTrackId == null) rememberCatalogCover(catalogCoverId) else null)
-            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                painter = rememberCatalogCover(catalogCoverId))
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (!subtitle.isNullOrBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall,
                     color = AutPlayTokens.colors.mutedText, maxLines = 2, overflow = TextOverflow.Ellipsis)

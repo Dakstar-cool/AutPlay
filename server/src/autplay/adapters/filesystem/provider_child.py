@@ -21,6 +21,7 @@ from typing import BinaryIO, Literal, cast
 from uuid import UUID, uuid4
 
 from autplay.adapters.child_process import provider_child_launch
+from autplay.adapters.media.edge_silence import trim_download_edges
 from autplay.adapters.media.tools import FfprobeInspector
 from autplay.domain.acquisition_policy import MAX_TRACK_SECONDS
 from autplay.domain.track_metadata import (
@@ -225,6 +226,10 @@ def download_youtube(candidate: str, workspace: Path, maximum: int) -> Path:
             raise ProviderChildError("provider_format_unsupported") from error
         if audio.duration_ms > MAX_TRACK_SECONDS * 1000:
             raise ProviderChildError("provider_track_policy_rejected")
+        try:
+            trim_download_edges(source, maximum)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            raise ProviderChildError("provider_format_unsupported") from error
         return source
     finally:
         watchdog.cancel()

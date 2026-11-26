@@ -167,6 +167,8 @@ class OfflineLibraryScreenTest {
         val queueId = requireNotNull(PlaybackRuntimeState.state.value.queueSnapshotId)
         val hero = hasAnyAncestor(hasTestTag("home-playback-hero"))
         val pause = hasContentDescription(strings.getString(R.string.action_pause)) and hero
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(pause).fetchSemanticsNodes().isNotEmpty() }
+        saveUiScreenshot("home-artist-glow")
         composeRule.onNode(pause).performClick()
         composeRule.waitUntil(10_000) { !PlaybackRuntimeState.state.value.isPlaying }
         composeRule.onNodeWithTag("home-wave-wheel").assertIsDisplayed()
@@ -174,12 +176,15 @@ class OfflineLibraryScreenTest {
         runBlocking { stopPlaybackService() }
         scenario = ActivityScenario.launch(MainActivity::class.java)
         composeRule.waitUntil(15_000) { composeRule.onAllNodes(start).fetchSemanticsNodes().isNotEmpty() }
-        composeRule.onNodeWithText("Линия моря — $title").assertIsDisplayed()
+        val resumedSong = hasText("Линия моря — $title")
+        composeRule.waitUntil(15_000) { composeRule.onAllNodes(resumedSong).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNodeWithTag("home-product-list").performScrollToNode(resumedSong)
+        composeRule.onNode(resumedSong).assertIsDisplayed()
         composeRule.onNodeWithTag("home-wave-wheel").assertIsDisplayed()
         composeRule.onNodeWithTag("home-track-carousel").assertDoesNotExist()
         composeRule.onNodeWithTag("persistent-mini-player").assertDoesNotExist()
         saveUiScreenshot("home-review-ready")
-        composeRule.onNode(start).performClick()
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.action_continue)).performClick()
         composeRule.waitUntil(15_000) { PlaybackRuntimeState.state.value.isPlaying }
         composeRule.onNode(pause).assertIsDisplayed()
         composeRule.onNodeWithTag("home-track-carousel").assertIsDisplayed()
@@ -294,7 +299,8 @@ class OfflineLibraryScreenTest {
         composeRule.onNodeWithTag("mini-player-track", useUnmergedTree = true).performTouchInput { click() }
         composeRule.onNodeWithTag("now-playing-panel").assertIsDisplayed()
         composeRule.onNodeWithTag("player-repeat").performClick()
-        composeRule.onNodeWithContentDescription(strings.getString(R.string.player_repeat_all)).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.player_repeat_once)).performClick()
+        composeRule.onNodeWithContentDescription(strings.getString(R.string.player_repeat_one)).assertIsDisplayed()
         val collapse = composeRule.onNodeWithContentDescription(strings.getString(R.string.player_collapse))
         collapse.performClick()
         awaitTrack(last, "На рассвете", false, previous, next)
@@ -428,7 +434,8 @@ class OfflineLibraryScreenTest {
         composeRule.onNodeWithTag("home-add-first-track").assertIsDisplayed()
         val home = composeRule.onNodeWithTag("home-product-list").fetchSemanticsNode()
         val indexOf = home.config[SemanticsProperties.IndexForKey]
-        for (key in listOf("home:new-releases", "home:recent-heading", "home:recommendations-heading",
+        org.junit.Assert.assertTrue(indexOf("home:new-releases") >= 0)
+        for (key in listOf("home:recent-heading", "home:recommendations-heading",
                 "home:playlists-heading", "home:offline-heading", "home:contexts-heading")) {
             org.junit.Assert.assertEquals(key, -1, indexOf(key))
         }
@@ -437,30 +444,19 @@ class OfflineLibraryScreenTest {
 
     @Test
     @SdkSuppress(minSdkVersion = 29)
-    fun homeAlbumRailOpensTheSelectedReleaseAndRecentRowPlaysLocalAudio() = runBlocking {
+    fun homeWithoutRecommendationsOmitsAlbumsAndRecentRowPlaysLocalAudio() = runBlocking {
         val title = "Обратный путь"
         val trackId = importPlayableSample(title)
         val db = AutPlayRuntime.database(context)
         val recordingId = LocalId.random().value
         db.catalogProjectionDao().upsertRecordings(listOf(recording(recordingId, title)))
         db.libraryDao().upsertTrackRef(requireNotNull(db.libraryDao().trackRef(trackId.value)).copy(localRecordingId = recordingId))
-        val albums = seedReleases(recordingId, listOf("Полярный свет", "Белая ночь", "Равновесие", "Течение", "Северный ветер"))
+        seedReleases(recordingId, listOf("Library album"))
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        val strip = composeRule.onNodeWithTag("home-release-strip")
-        composeRule.waitUntil(15_000) { composeRule.onAllNodesWithTag("home-release-strip").fetchSemanticsNodes().isNotEmpty() }
+        composeRule.waitUntil(15_000) { composeRule.onAllNodesWithTag("home-product-list").fetchSemanticsNodes().isNotEmpty() }
         composeRule.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-recent"))
         composeRule.onNodeWithTag("home-recent").assert(hasText(title)).assertIsDisplayed()
-        saveUiScreenshot("home-album-rail")
-        strip.performTouchInput { swipeLeft() }
-        strip.performScrollToNode(hasTestTag("home-release:${albums.last().first}"))
-        composeRule.onNodeWithTag("home-release:${albums.last().first}").performTouchInput { click() }
-        composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithTag("home-product-list").fetchSemanticsNodes().isEmpty() &&
-                composeRule.onAllNodesWithText(albums.last().second).fetchSemanticsNodes().isNotEmpty()
-        }
-        val strings = localizedAppContext(context, AppLanguage.Russian)
-        waitForNavigation(strings.getString(R.string.nav_home)).performClick()
-        composeRule.onNodeWithTag("home-product-list").performScrollToNode(hasTestTag("home-recent"))
+        composeRule.onNodeWithTag("home-release-strip").assertDoesNotExist()
         composeRule.onNodeWithTag("home-recent").performTouchInput { click() }
         composeRule.waitUntil(15_000) {
             PlaybackRuntimeState.state.value.let { it.isPlaying && it.localUserTrackRefId == trackId.value }
@@ -542,7 +538,9 @@ class OfflineLibraryScreenTest {
             swipeUp(startY = center.y)
         }
         saveUiScreenshot("track-row-library")
-        composeRule.onNodeWithTag("library-track-$TRACK").performClick()
+        // Tap the track title. On compact screens the middle of the row can be a download button.
+        val title = hasText("Offline sample") and hasAnyAncestor(hasTestTag("library-track-$TRACK"))
+        composeRule.onNode(title, useUnmergedTree = true).performTouchInput { click() }
 
         composeRule.waitUntil(timeoutMillis = 10_000) {
             runBlocking {
@@ -572,7 +570,7 @@ class OfflineLibraryScreenTest {
     }
 
     @Test
-    fun libraryBrowsesAlbumAndPlaylistGridsWithPersistentShortcuts() = runBlocking {
+    fun libraryBrowsesAlbumAndPlaylistGridsWithPersistentShortcuts(): Unit = runBlocking {
         val language = AppLanguage.Russian
         applicationNonSecretSettingsStore(context).mutate { it.copy(appLanguage = language.storedValue) }
         val strings = localizedAppContext(context, language)
@@ -637,6 +635,16 @@ class OfflineLibraryScreenTest {
             androidx.test.espresso.Espresso.pressBack()
             composeRule.onNodeWithTag("library-product-list").assertIsDisplayed()
         }
+        composeRule.onNodeWithTag("personal-library-search").performTextInput("Morning")
+        composeRule.onNodeWithText("Morning Walk").performClick()
+        composeRule.onNodeWithTag("collection-details").assertIsDisplayed()
+        waitForNavigation(strings.getString(R.string.nav_library)).performClick()
+        composeRule.onNodeWithTag("library-tab-Tracks").assert(isSelected())
+        composeRule.onNodeWithTag("library-track-$TRACK").assertIsDisplayed()
+        composeRule.onNodeWithTag("library-favorites").performClick()
+        composeRule.onNodeWithTag("personal-library-search").performTextInput("unmatched")
+        waitForNavigation(strings.getString(R.string.nav_library)).performClick()
+        composeRule.onNodeWithTag("library-track-$TRACK").assertIsDisplayed()
     }
 
     @Test
@@ -742,11 +750,12 @@ class OfflineLibraryScreenTest {
             tag(tile).performClick()
             awaitTag("collection-listen")
         }
-        fun checkCover() {
+        fun checkCover(node: String = "collection-artwork") {
             composeRule.waitUntil(10_000) {
-                val pixels = tag("collection-artwork").captureToImage().toPixelMap()
-                val sun = pixels[pixels.width / 2, pixels.height / 2]
-                val sea = pixels[pixels.width / 2, pixels.height * 9 / 10]
+                val pixels = tag(node).captureToImage().toPixelMap()
+                val side = minOf(pixels.width, pixels.height)
+                val sun = pixels[pixels.width / 2, side / 2]
+                val sea = pixels[pixels.width / 2, side * 9 / 10]
                 sun.red > .9f && sun.green > .55f && sun.blue < .5f && sea.blue > sea.red
             }
         }
@@ -768,7 +777,9 @@ class OfflineLibraryScreenTest {
         checkCover()
         saveUiScreenshot("detail-album")
         tag("collection-open-artist").performClick()
-        awaitTag("artist-album-${pages.serverAlbum}")
+        awaitTag("artist-header")
+        tag("collection-details").performScrollToNode(hasTestTag("artist-album-${pages.serverAlbum}"))
+        checkCover("artist-album-${pages.serverAlbum}")
         back()
         awaitTag("collection-listen")
         tag("collection-listen").performClick()
@@ -778,8 +789,10 @@ class OfflineLibraryScreenTest {
         composeRule.onNodeWithTag("mini-player-track", useUnmergedTree = true).performTouchInput { click() }
         awaitTag("player-open-artist")
         tag("player-open-artist").performClick()
-        awaitTag("artist-album-${pages.serverAlbum}")
+        awaitTag("artist-header")
+        tag("collection-details").performScrollToNode(hasText(strings.getString(R.string.detail_artist_popular)))
         composeRule.onNodeWithText(strings.getString(R.string.detail_artist_popular)).assertIsDisplayed()
+        tag("collection-details").performScrollToNode(hasTestTag("artist-track-${pages.recordings[1]}"))
         tag("artist-track-${pages.recordings[1]}").assertIsDisplayed()
         saveUiScreenshot("detail-artist")
         tag("collection-details").performScrollToNode(hasText(strings.getString(R.string.detail_artist_info)))
@@ -790,7 +803,8 @@ class OfflineLibraryScreenTest {
         tag("artist-album-${pages.serverAlbum}").performClick()
         awaitTag("collection-listen")
         back()
-        awaitTag("artist-album-${pages.serverAlbum}")
+        awaitTag("collection-details")
+        tag("collection-details").performScrollToNode(hasTestTag("artist-album-${pages.serverAlbum}"))
         back()
         awaitTag("player-open-artist")
         back()
@@ -984,8 +998,10 @@ class OfflineLibraryScreenTest {
         val home = node("home-product-list")
         home.performScrollToNode(hasTestTag("home-recent"))
         composeRule.onAllNodesWithTag("home-recent")[0].assertIsDisplayed()
-        home.performScrollToNode(hasTestTag("home-release-strip"))
-        shown("home-release:${pages.album}").performClick()
+        waitForNavigation(strings.getString(R.string.nav_library)).performClick()
+        node("library-sections").performScrollToNode(hasTestTag("library-tab-Albums"))
+        shown("library-tab-Albums").performClick()
+        shown("library-album:${pages.album}").performClick()
         shown("album-track-${pages.albumEntries.last()}")
         shown("collection-open-artist").performClick()
         shown("artist-track-${pages.recordings.last()}")
@@ -1106,12 +1122,11 @@ class OfflineLibraryScreenTest {
 
         scenario = ActivityScenario.launch(MainActivity::class.java)
         openLibrary()
-        val reviewTab = hasTestTag("library-tab-Review")
-        composeRule.onNodeWithTag("library-sections").assertIsDisplayed().performScrollToNode(reviewTab)
-        composeRule.onNode(reviewTab).performClick()
-        val openReview = hasText(defaultStrings.getString(R.string.nav_import_review)) and hasClickAction()
-        scrollLibraryTo(openReview)
-        composeRule.onNode(openReview).assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("library-tab-Review").assertDoesNotExist()
+        waitForNavigation(defaultStrings.getString(R.string.nav_home)).performClick()
+        val openReview = hasText(defaultStrings.getString(R.string.home_problems_open)) and hasClickAction()
+        composeRule.onNodeWithTag("home-product-list").performScrollToNode(openReview)
+        composeRule.onNode(openReview).performClick()
         composeRule.onNodeWithTag("library-product-list").assertDoesNotExist()
         val importSummary = defaultStrings.getString(R.string.import_summary, 1)
         composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -1187,9 +1202,9 @@ class OfflineLibraryScreenTest {
         Unit
     }
 
-    private fun waitForNavigation(label: String) = composeRule.onNode(hasText(label) and hasClickAction()).also {
+    private fun waitForNavigation(label: String) = composeRule.onNodeWithContentDescription(label).also {
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithContentDescription(label).fetchSemanticsNodes().isNotEmpty()
         }
     }
 
@@ -1258,7 +1273,8 @@ class OfflineLibraryScreenTest {
         return titles.mapIndexed { i, title ->
             val id = LocalId.random().value
             database.catalogProjectionDao().upsertReleases(listOf(ReleaseProjectionEntity(
-                id, null, null, title, "AutPlay test", null, "ALBUM", null, 1, i.toLong(), false)))
+                id, null, null, title, "AutPlay test", "2020-03-%02d".format(java.util.Locale.ROOT, i + 1),
+                "ALBUM", null, 1, (titles.size - i).toLong(), false)))
             database.catalogProjectionDao().upsertReleaseTracks(listOf(ReleaseTrackProjectionEntity(
                 LocalId.random().value, null, id, recordingId, 1, 1, null, "Offline sample", "AutPlay test", null)))
             id to title

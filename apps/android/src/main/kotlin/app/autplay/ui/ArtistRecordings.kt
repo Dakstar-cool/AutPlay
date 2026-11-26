@@ -12,7 +12,13 @@ internal data class ArtistRecording(
     val count: Long?,
     val guest: Boolean,
 ) {
-    val title get() = local?.title ?: card?.title
+    val catalogPerformers: List<Pair<String, String>> get() =
+        card?.performerLinks().orEmpty()
+    val title = card?.title ?: local?.let { appearance ->
+        val mainArtist = appearance.performers.firstOrNull()?.name
+        if (mainArtist == null) appearance.title else
+            app.autplay.application.artist.trackNames(appearance.title, mainArtist, hasArtist = true).title
+    }
     val displayKey get() = local?.displayKey ?: key
 }
 
@@ -29,7 +35,7 @@ internal fun artistRecordings(state: CoreProductDetailUiState): List<ArtistRecor
         val key = mbid ?: "library:${local.displayKey}"
         val card = publicCards[mbid]
         rows.putIfAbsent(key, ArtistRecording(key, local, card,
-            state.publicCounts[mbid] ?: state.ranking[local.displayKey], local.guest || guest(card)))
+            state.publicCounts[mbid] ?: state.ranking[local.displayKey] ?: local.listenCount.toLong().takeIf { it > 0 }, local.guest || guest(card)))
     }
     for ((mbid, card) in publicCards) {
         rows.putIfAbsent(mbid, ArtistRecording(mbid, null, card, state.publicCounts[mbid], guest(card)))
@@ -37,3 +43,11 @@ internal fun artistRecordings(state: CoreProductDetailUiState): List<ArtistRecor
     return rows.values.sortedWith(compareByDescending<ArtistRecording> { it.count }
         .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title.orEmpty() }.thenBy { it.key })
 }
+
+internal fun InternetMetadataDiscoveryCard.performerLinks(): List<Pair<String, String>> =
+        (rawPayload["artist_members"] as? JsonArray).orEmpty().mapNotNull { value ->
+            val member = value as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+            val id = (member["mbid"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+            val name = (member["name"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+            id.takeIf { runCatching { java.util.UUID.fromString(it).toString() == it }.getOrDefault(false) }?.let { it to name }
+        }

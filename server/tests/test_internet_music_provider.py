@@ -49,6 +49,39 @@ def test_search_requires_an_available_catalog_audio_track(monkeypatch: pytest.Mo
     assert catalog.song_candidates("Oasis live at Wembley") == []
 
 
+def test_studio_preference_precedes_result_limit_and_respects_requested_edits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    template = dict(
+        artists=[{"name": "Artist | hitmos"}],
+        album={"name": "Album"},
+        duration_seconds=180,
+        resultType="song",
+        videoType="MUSIC_VIDEO_TYPE_ATV",
+    )
+    titles = ["Song (Sped Up)"] * 29 + [
+        "Song | Stabal Session",
+        "[muzmo.ru] Song",
+        "Another Song",
+        "Song (Remix)",
+    ]
+
+    def search(query: str, **kwargs: object) -> list[dict[str, object]]:
+        assert "muzmo" not in query
+        return [dict(template, title=t, videoId=f"{i:011d}") for i, t in enumerate(titles)]
+
+    monkeypatch.setattr(catalog, "_catalog", lambda: SimpleNamespace(search=search))
+    ordinary = catalog.song_candidates("Artist Song [muzmo.ru]")
+    assert (ordinary[0]["title"], ordinary[0]["artist"]) == ("Song", "Artist")
+    assert [c["rank"] for c in ordinary] == list(range(1, 26))
+    for edit in ("Sped Up", "Remix"):
+        assert catalog.song_candidates("Artist Song " + edit)[0]["title"] == f"Song ({edit})"
+    assert (
+        catalog.song_candidates("Artist Song (Stabal Session)")[0]["title"]
+        == "Song | Stabal Session"
+    )
+
+
 def test_twenty_five_distinct_studio_songs_keep_provider_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -70,6 +103,20 @@ def test_twenty_five_distinct_studio_songs_keep_provider_order(
     rows = catalog.song_candidates("Artist")
     assert [row["candidate_id"] for row in rows] == [f"{i:011d}" for i in range(25)]
     assert [row["rank"] for row in rows] == list(range(1, 26))
+
+
+def test_explicit_studio_version_precedes_a_bare_english_speed_edit() -> None:
+    from autplay.domain.music_discovery import source_preference
+
+    editions = ["Song speed up", "Song (Remix)", "Song (Studio Version)"]
+    assert (
+        sorted(editions, key=lambda t: source_preference("Artist Song", t, "Artist"))[0]
+        == editions[2]
+    )
+    assert (
+        sorted(editions, key=lambda t: source_preference("Artist Song speed up", t, "Artist"))[0]
+        == editions[0]
+    )
 
 
 @pytest.mark.parametrize(

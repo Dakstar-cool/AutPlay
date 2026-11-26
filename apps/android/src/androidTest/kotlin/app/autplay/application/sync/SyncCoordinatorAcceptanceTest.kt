@@ -44,6 +44,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -381,6 +382,26 @@ class SyncCoordinatorAcceptanceTest {
         val second = db.libraryDao().trackRefByServerId(otherProfile.value, server)
         assertNotNull(first); assertNotNull(second)
         assertFalse(first!!.localUserTrackRefId == second!!.localUserTrackRefId)
+    }
+
+    @Test fun updatedSnapshotRestoresLikesAndPortableChangesUseAccountTrackIdentity() = runBlocking {
+        seed(profile, "previous")
+        val ref = "12121212-1212-4212-8212-121212121212"
+        val other = "13131313-1313-4313-8313-131313131313"
+        val snapshot = BootstrapPage("14141414-1414-4414-8414-141414141414", null, "library", false, listOf(
+            RemoteEvent(ref, 0, "USER_TRACK_REF_CREATED", 1, """{"title":"From account"}""", "USER_TRACK_REF", ref, 1),
+            RemoteEvent(ref, 0, "USER_TRACK_PREFERENCE_SET", 1,
+                """{"server_user_track_ref_id":"$ref","preference":"LIKED"}""", "USER_TRACK_PREFERENCE", ref, 1),
+        ), personalLibraryVersion = 2)
+        val portable = RemoteEvent("15151515-1515-4515-8515-151515151515", 1, "PORTABLE_TRACK_PREFERENCE_PROJECTED", 1,
+            """{"server_user_track_ref_id":"$other","title":"Portable favorite","preference":"LIKED"}""",
+            "USER_TRACK_PREFERENCE", other, 1)
+        val remote = FakeTransport(pull = PullPage("current", false, listOf(portable), 2), bootstrapPages = listOf(snapshot))
+        assertTrue(SyncCoordinator(db, remote).run(binding))
+        val favorites = db.libraryDao().browseLibrary(profile.value, Int.MAX_VALUE).first().filter { it.loved }
+        assertEquals(setOf("From account", "Portable favorite"), favorites.map { it.title }.toSet())
+        assertTrue(favorites.none { it.onDevice })
+        assertEquals(2, db.syncDao().cursor(profile.value)?.personalLibraryVersion)
     }
 
     @Test fun catalogArtistReplayAndStaleVersionCannotReplaceNewerIdentity() = runBlocking {

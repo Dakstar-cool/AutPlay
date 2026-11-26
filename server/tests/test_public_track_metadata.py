@@ -11,6 +11,7 @@ from autplay.adapters.media.track_metadata import fields_from_tags
 from autplay.adapters.public_track_metadata import (
     MusicBrainzMetadataProvider,
     PublicMetadataHttp,
+    _credit_members,
     validate_public_url,
 )
 from autplay.domain.track_metadata import MetadataQuery, automatic_candidate, parse_source_metadata
@@ -37,6 +38,29 @@ def recording(number: int, duration: int, releases: Iterable[int]) -> dict[str, 
         "score": 100,
         "releases": [{"id": str(UUID(int=i)), "title": "Album", "date": "1998"} for i in releases],
     }
+
+
+def test_featured_performers_share_the_credit_until_the_end_of_the_guest_list() -> None:
+    credit = [
+        {"artist": {"id": str(UUID(int=i)), "name": name}, "joinphrase": join}
+        for i, (name, join) in enumerate(
+            [
+                ("Lead", " & "),
+                ("Co-lead", " feat. "),
+                ("Guest", ", "),
+                ("Second", " & "),
+                ("Third", ""),
+            ],
+            start=1,
+        )
+    ]
+    assert [member["role"] for member in _credit_members(credit)] == [
+        "PRIMARY",
+        "PRIMARY",
+        "FEATURED",
+        "FEATURED",
+        "FEATURED",
+    ]
 
 
 def test_truncated_results_cannot_create_a_false_unique_match() -> None:
@@ -123,6 +147,8 @@ def test_embedded_tags_preserve_date_precision_and_ignore_invalid_values() -> No
     assert fields_from_tags(
         {
             "ALBUM": "Record",
+            "COMPOSER": "Writer Name",
+            "ARTIST": "Cover Band",
             "DATE": "2001-04",
             "YEAR": "2001",
             "ORIGINALDATE": "1998",
@@ -134,6 +160,8 @@ def test_embedded_tags_preserve_date_precision_and_ignore_invalid_values() -> No
         }
     ) == {
         "album": "Record",
+        "composer": "Writer Name",
+        "artist": "Cover Band",
         "release_date": "2001-04",
         "original_release_date": "1998",
         "track_number": 3,
@@ -560,3 +588,67 @@ def test_occurrence_lookup_needs_recording_and_edition_context() -> None:
         MusicBrainzMetadataProvider(Http({})).search(
             MetadataQuery("Song", "Artist", release_track_mbid=str(UUID(int=108)))
         )
+
+
+def test_search_abbreviations_never_become_identity_evidence() -> None:
+    from autplay.domain.track_metadata import MetadataCandidate, metadata_search_terms
+
+    query = MetadataQuery(
+        "A Very Long Composition Title (Official Video)", "Alice Cooper", duration_ms=180000
+    )
+    terms = metadata_search_terms(query.title, query.artist)
+    assert terms[0] == (query.title, query.artist)
+    assert terms[-2:] == (
+        ("A Very Long Composition", "Alice Cooper"),
+        ("A Very Long Composition", "Alice"),
+    )
+    candidate = MetadataCandidate(
+        "test", {"title": "A Very Long Composition", "artist": "Alice"}, 180000, 100, "test"
+    )
+    assert not candidate.exact_for(query)
+
+
+def test_search_continues_past_studio_hit_to_matching_session() -> None:
+    query = MetadataQuery(
+        "Life is wasted on the living | Monitor Sessions", "Moto Boy", duration_ms=223000
+    )
+
+    class SessionHttp(Http):
+        def json(self, url: str, *, post: bytes | None = None) -> dict[str, Any]:
+            self.urls.append(url)
+            expression = parse_qs(urlsplit(url).query)["query"][0]
+            item = recording(1, 223000, [10])
+            item.update(
+                title="Life is wasted on the living", **{"artist-credit": [{"name": "Moto Boy"}]}
+            )
+            if "Sessions" not in expression:
+                item.update(id=str(UUID(int=2)), disambiguation="Monitor Sessions")
+            return {"count": 1, "recordings": [item]}
+
+    http = SessionHttp({})
+    match = automatic_candidate(query, MusicBrainzMetadataProvider(http).search(query))
+    assert match and match.fields["mb_recording_id"] == str(UUID(int=2))
+    assert len(http.urls) >= 2
+
+
+def test_joined_source_title_can_retrieve_a_spaced_instrumental_by_artist_and_duration() -> None:
+    query = MetadataQuery(
+        "icantbelieveiletyougetaway | High quality instrumental", "aldn", duration_ms=135941
+    )
+    spaced = "I can't believe I let you get away"
+
+    class ArtistHttp(Http):
+        def json(self, url: str, *, post: bytes | None = None) -> dict[str, Any]:
+            expression = parse_qs(urlsplit(url).query)["query"][0]
+            self.urls.append(expression)
+            row = recording(1, 135941, [10])
+            row.update(title=spaced, **{"artist-credit": [{"name": "aldn"}]})
+            if "recording:" in expression:
+                return {"count": 1, "recordings": [row]}
+            row.update(id=str(UUID(int=2)), disambiguation="instrumental")
+            return {"count": 1, "recordings": [row]}
+
+    http = ArtistHttp({})
+    match = automatic_candidate(query, MusicBrainzMetadataProvider(http).search(query))
+    assert match and match.fields["mb_recording_id"] == str(UUID(int=2))
+    assert http.urls[-1] == 'artist:"aldn" AND dur:[133941 TO 137941]'

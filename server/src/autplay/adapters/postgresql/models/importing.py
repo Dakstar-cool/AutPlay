@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     PrimaryKeyConstraint,
     Text,
     UniqueConstraint,
@@ -22,6 +25,34 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
 from .types import JsonValue
+
+
+class CollectionImportRow(Base):
+    """One owner-authorized link and its resumable, sanitized preview."""
+
+    __tablename__ = "collection_import"
+    __table_args__ = (
+        Index("collection_import_owner_collection", "owner", "collection_id", "created_at"),
+        {"schema": "importing"},
+    )
+    owner: Mapped[UUID] = mapped_column(
+        ForeignKey("account.user_account.user_id", ondelete="CASCADE"), primary_key=True
+    )
+    operation_id: Mapped[UUID] = mapped_column(primary_key=True)
+    collection_id: Mapped[UUID]
+    provider: Mapped[str] = mapped_column(Text)
+    source_key: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    action: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    import_job_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("importing.import_job.import_job_id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
 
 
 class ImportJobRow(Base):

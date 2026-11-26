@@ -42,6 +42,7 @@ from autplay.application.identity_evidence import (
     canonical_query_snapshot,
 )
 from autplay.application.sync import CatalogArtistSyncPublisher, _acquire_sync_owner_publish_lock
+from autplay.application.vault_names import project_owner_names
 from autplay.domain.auth import Principal
 from autplay.domain.import_identity import (
     CANDIDATE_GENERATION_VERSION,
@@ -50,6 +51,7 @@ from autplay.domain.import_identity import (
     NORMALIZATION_VERSION,
     normalize_text,
 )
+from autplay.domain.track_names import track_names
 
 
 class MusicError(RuntimeError):
@@ -84,6 +86,7 @@ class MusicLibraryService:
         _acquire_sync_owner_publish_lock(session, owner_user_id)
         ref = MusicLibraryService._owned_ref(session, owner_user_id, ref_id)
         if ref.recording_id is not None:
+            project_owner_names(session, ref, ref.recording_id)
             return ref.recording_id
         predecessor = (
             session.get(MatchDecisionRow, ref.current_match_decision_id)
@@ -98,10 +101,11 @@ class MusicLibraryService:
         if predecessor.owner_user_id != owner_user_id or predecessor.user_track_ref_id != ref_id:
             raise MusicError("music_identity_conflict", "The track needs identity review.", 409)
         snapshot = current_snapshot(session.get(TrackMetadataRow, ref_id))
+        file_title, file_artist = track_names(ref.raw_title, ref.raw_artist)
         if snapshot:
             credit_id = confirmed_credit(session, snapshot)
         else:
-            artist_name = ref.raw_artist or "Unknown artist"
+            artist_name = file_artist or "Unknown artist"
             artist = ArtistRow(
                 name=artist_name,
                 sort_name=artist_name,
@@ -124,7 +128,7 @@ class MusicLibraryService:
                 )
             )
             credit_id = credit.artist_credit_id
-        title = ref.raw_title or "Audio"
+        title = (snapshot["fields"].get("title") if snapshot else None) or file_title or "Audio"
         recording = RecordingRow(
             artist_credit_id=credit_id,
             title=title,
@@ -188,6 +192,7 @@ class MusicLibraryService:
         if snapshot:
             project_edition(session, ref, snapshot)
             session.flush()
+        project_owner_names(session, ref, recording.recording_id)
         CatalogArtistSyncPublisher().publish(session, owner_user_id, ref_ids=(ref_id,))
         return recording.recording_id
 
@@ -266,7 +271,9 @@ class MusicLibraryService:
         upload_id: UUID,
     ) -> None:
         _acquire_sync_owner_publish_lock(session, owner_user_id)
-        MusicLibraryService._owned_ref(session, owner_user_id, ref_id)
+        ref = MusicLibraryService._owned_ref(session, owner_user_id, ref_id)
+        if ref.recording_id is not None:
+            project_owner_names(session, ref, ref.recording_id)
         entry = session.scalar(
             select(LibraryEntryRow)
             .where(

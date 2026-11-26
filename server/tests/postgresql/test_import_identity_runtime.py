@@ -5,7 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Barrier
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 import autplay.adapters.postgresql.import_runtime as import_runtime
 import pytest
@@ -770,6 +770,68 @@ def test_overlapping_merges_cannot_leave_redirect_to_merged_target(
                 )
             )
         assert invalid_redirects == 0
+    finally:
+        engine.dispose()
+
+
+def test_personal_library_keeps_manual_save_and_excludes_automatic_vault_receipt(
+    database_url: str,
+) -> None:
+    from autplay.adapters.postgresql.library_runtime import LibraryRepository
+    from autplay.application.sync import _bootstrap_projections
+
+    engine, sessions, actor = _runtime(database_url)
+    try:
+        _insert_recording(engine, "Stock", "Artist")
+        _insert_recording(engine, "My import", "Artist")
+        service = ImportService(sessions)
+        receipt = service.start(
+            actor,
+            payload=(
+                b'[{"title":"Stock","artist":"Artist","external_id":"acquisition:receipt"},'
+                b'{"title":"My import","artist":"Artist","external_id":"acquisition:manual"}]'
+            ),
+            format_name="JSON",
+            schema_version="1",
+            mode="LIBRARY_ONLY",
+        )
+        assert _run_import_worker(sessions) is WorkerOutcome.COMPLETED
+        for report_entry in service.report(actor, receipt.import_job_id).entries:
+            assert report_entry.decision_id is not None
+            service.review(
+                actor,
+                receipt.import_job_id,
+                report_entry.import_entry_id,
+                predecessor_decision_id=report_entry.decision_id,
+                action="CREATE_RECORDING",
+                selected_rank=None,
+                idempotency_key="test-receipt:" + str(report_entry.import_entry_id),
+            )
+        with sessions.begin() as session:
+            entries = list(session.scalars(select(ImportEntryRow)))
+            assert len(entries) == 2
+            identifiers = {}
+            for entry in entries:
+                identity = (
+                    uuid5(actor.user_id, "receipt") if entry.raw_title == "Stock" else uuid4()
+                )
+                assert entry.user_track_ref_id is not None
+                identifiers[entry.raw_title] = LibraryRepository(session).add_library_entry(
+                    actor,
+                    library_entry_id=identity,
+                    user_track_ref_id=entry.user_track_ref_id,
+                    source="IMPORT",
+                    availability_status="PENDING",
+                    now=datetime.now(UTC),
+                )
+            snapshot = _bootstrap_projections(session, actor.user_id, personal_library=True)
+            saves = {
+                identity: payload["personal_save"]
+                for kind, identity, _, payload in snapshot
+                if kind == "LIBRARY_ENTRY"
+            }
+            assert saves[identifiers["Stock"]] is False
+            assert saves[identifiers["My import"]] is True
     finally:
         engine.dispose()
 

@@ -10,6 +10,38 @@ data class SharedPlaylistTrack(
     val recordingId: String?,
 )
 
+/** A private playlist copy from a share or an artist/title text export. */
+data class PlaylistImportFile(
+    val name: String, val description: String?, val tracks: List<SharedPlaylistTrack>,
+    val entries: List<Int>, val shareToken: String?,
+) {
+    constructor(share: SharedPlaylist) : this(share.name, share.description, share.tracks, share.entries, share.token)
+
+    companion object {
+        fun decode(bytes: ByteArray, fileName: String): PlaylistImportFile {
+            require(bytes.size <= SharedPlaylist.MAX_FILE_BYTES)
+            val content = bytes.decodeToString(throwOnInvalidSequence = true).removePrefix("\uFEFF").trim()
+            if (content.startsWith("{")) return PlaylistImportFile(SharedPlaylist.decode(content.encodeToByteArray()))
+            val indices = linkedMapOf<SharedPlaylistTrack, Int>()
+            val entries = mutableListOf<Int>()
+            val separator = Regex("""\s+[-–—]\s+""")
+            content.lineSequence().map(String::trim).filter(String::isNotEmpty).forEachIndexed { index, line ->
+                val fields = if ('\t' in line) line.split('\t') else separator.split(line, limit = 2)
+                require(fields.size in 2..3)
+                if (index == 0 && fields.map { it.trim().lowercase() } in listOf(
+                        listOf("artist", "title"), listOf("artist", "title", "album"))) return@forEachIndexed
+                val artist = fields[0].trim()
+                val title = fields[1].trim()
+                require(artist.length in 1..4096 && title.length in 1..4096 && entries.size < SharedPlaylist.MAX_ENTRIES)
+                entries += indices.getOrPut(SharedPlaylistTrack(title, artist, null, null)) { indices.size }
+            }
+            require(entries.isNotEmpty())
+            return PlaylistImportFile(fileName.substringBeforeLast('.', fileName).trim().take(120).ifEmpty { "Playlist" },
+                null, indices.keys.toList(), entries, null)
+        }
+    }
+}
+
 data class SharedPlaylist(
     val format: String,
     val token: String,

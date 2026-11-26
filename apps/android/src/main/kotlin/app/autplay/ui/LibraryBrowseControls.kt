@@ -7,7 +7,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -31,9 +32,9 @@ internal fun LibraryBrowseControls(
     onDownloads: () -> Unit,
     onAdd: () -> Unit,
 ) {
-    val sections = listOf(LibrarySection.Tracks, LibrarySection.Artists, LibrarySection.Albums, LibrarySection.Playlists, LibrarySection.Review)
+    val sections = listOf(LibrarySection.Tracks, LibrarySection.Artists, LibrarySection.Albums, LibrarySection.Playlists)
     LazyRow(
-        Modifier.fillMaxWidth().testTag("library-sections"),
+        Modifier.fillMaxWidth().padding(top = 8.dp).testTag("library-sections"),
         contentPadding = PaddingValues(horizontal = AutPlayTokens.dimensions.screenPadding),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -43,62 +44,64 @@ internal fun LibraryBrowseControls(
                 Modifier.testTag("library-tab-$section").semantics { selected = active })
         }
     }
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = AutPlayTokens.dimensions.screenPadding, vertical = 4.dp)) {
-        val showIcons = maxWidth >= 340.dp && LocalDensity.current.fontScale <= 1.3f
-        val favorites = state.section == LibrarySection.Tracks && state.filter == LibraryFilter.Loved
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            QuickLibraryAction(
-                stringResource(R.string.library_favorites_shortcut), AutPlayIcon.Favorite, showIcons, favorites,
-                Modifier.weight(1f).testTag("library-favorites").semantics { selected = favorites },
-            ) {
-                onSectionChange(LibrarySection.Tracks)
-                onFilterChange(if (favorites) LibraryFilter.All else LibraryFilter.Loved)
-            }
-            QuickLibraryAction(stringResource(R.string.nav_downloads), AutPlayIcon.Download, showIcons, false,
-                Modifier.weight(1f).testTag("library-downloads"), onDownloads)
-            if (state.section == LibrarySection.Tracks) {
-                var expanded by remember { mutableStateOf(false) }
-                val sortLabel = librarySortLabel(state.sort)
-                Box {
-                    IconButton(onClick = { expanded = true },
-                        modifier = Modifier.size(48.dp).testTag("library-sort").semantics { stateDescription = sortLabel }) {
-                        Icon(painterResource(R.drawable.ic_autplay_sort), stringResource(R.string.library_sort_label))
-                    }
-                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        LibrarySort.entries.forEach { sort ->
-                            DropdownMenuItem(
-                                text = { Text(librarySortLabel(sort)) },
-                                trailingIcon = { if (sort == state.sort) AutPlayPlatformIcon(AutPlayIcon.Check, null) },
-                                modifier = Modifier.testTag("library-sort-$sort").semantics { selected = state.sort == sort },
-                                onClick = {
-                                    expanded = false
-                                    onSortChange(sort)
-                                },
-                            )
-                        }
+    val favorites = state.section == LibrarySection.Tracks && state.filter == LibraryFilter.Loved
+    val onDevice = state.section == LibrarySection.Tracks && state.filter == LibraryFilter.OnDevice
+    Row(Modifier.fillMaxWidth().padding(horizontal = AutPlayTokens.dimensions.screenPadding, vertical = 8.dp)
+        .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        QuickLibraryAction(stringResource(R.string.library_favorites_shortcut), AutPlayIcon.Favorite, favorites,
+            Modifier.testTag("library-favorites").semantics { selected = favorites }) {
+            onSectionChange(LibrarySection.Tracks)
+            onFilterChange(if (favorites) LibraryFilter.All else LibraryFilter.Loved)
+        }
+        QuickLibraryAction(stringResource(R.string.library_on_device), AutPlayIcon.Devices, onDevice,
+            Modifier.testTag("library-device").semantics { selected = onDevice }) {
+            onSectionChange(LibrarySection.Tracks)
+            onFilterChange(if (onDevice) LibraryFilter.All else LibraryFilter.OnDevice)
+        }
+        QuickLibraryAction(stringResource(R.string.nav_downloads), AutPlayIcon.Download, false,
+            Modifier.testTag("library-downloads"), onDownloads)
+        if (state.section == LibrarySection.Tracks) {
+            var expanded by remember { mutableStateOf(false) }
+            val sortLabel = librarySortLabel(state.sort)
+            Box {
+                IconButton(onClick = { expanded = true },
+                    modifier = Modifier.size(48.dp).testTag("library-sort").semantics { stateDescription = sortLabel }) {
+                    Icon(painterResource(R.drawable.ic_autplay_sort), stringResource(R.string.library_sort_label))
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    LibrarySort.entries.forEach { sort ->
+                        DropdownMenuItem(
+                            text = { Text(librarySortLabel(sort)) },
+                            trailingIcon = { if (sort == state.sort) AutPlayPlatformIcon(AutPlayIcon.Check, null) },
+                            modifier = Modifier.testTag("library-sort-$sort").semantics { selected = state.sort == sort },
+                            onClick = {
+                                expanded = false
+                                onSortChange(sort)
+                            },
+                        )
                     }
                 }
             }
-            IconButton(onClick = onAdd, enabled = !state.importingLocalTrack,
-                modifier = Modifier.size(48.dp).testTag("library-add")) {
-                Icon(painterResource(R.drawable.ic_autplay_add),
-                    stringResource(if (state.importingLocalTrack) R.string.library_adding_local else R.string.library_add_local))
-            }
+        }
+        IconButton(onClick = onAdd, enabled = !state.importingLocalTrack,
+            modifier = Modifier.size(48.dp).testTag("library-add")) {
+            Icon(painterResource(R.drawable.ic_autplay_add),
+                stringResource(if (state.importingLocalTrack) R.string.library_adding_local else R.string.library_add_local))
         }
     }
 }
 
 @Composable
 private fun QuickLibraryAction(
-    label: String, icon: AutPlayIcon, showIcon: Boolean, active: Boolean, modifier: Modifier, onClick: () -> Unit,
+    label: String, icon: AutPlayIcon, active: Boolean, modifier: Modifier, onClick: () -> Unit,
 ) {
-    Surface(onClick = onClick, modifier = modifier.heightIn(min = 48.dp).semantics { role = Role.Button },
+    Surface(onClick = onClick, modifier = modifier.size(48.dp).semantics { role = Role.Button },
         shape = MaterialTheme.shapes.medium,
         color = if (active) MaterialTheme.colorScheme.primaryContainer else AutPlayTokens.colors.raisedSurface) {
-        Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)) {
-            if (showIcon) AutPlayPlatformIcon(icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-            Text(label, style = MaterialTheme.typography.labelLarge)
+        Box(contentAlignment = Alignment.Center) {
+            AutPlayPlatformIcon(icon, label, Modifier.size(22.dp), tint = if (active) MaterialTheme.colorScheme.onPrimaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

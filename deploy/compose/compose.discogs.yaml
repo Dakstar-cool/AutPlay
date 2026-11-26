@@ -1,0 +1,15 @@
+# Add this file after the deployment's existing Compose files to enable Discogs search.
+x-discogs-api: &discogs-api
+  environment:
+    AUTPLAY_DISCOGS_TOKEN_FILE: /run/secrets/autplay-discogs-catalog
+  secrets:
+    - source: autplay-discogs-catalog
+      target: autplay-discogs-catalog
+
+services:
+  api: *discogs-api
+  mobile-api: *discogs-api
+
+secrets:
+  autplay-discogs-catalog:
+    file: "${AUTPLAY_RUNTIME_DISCOGS_TOKEN_FILE:?set AUTPLAY_RUNTIME_DISCOGS_TOKEN_FILE to the host credential file}"

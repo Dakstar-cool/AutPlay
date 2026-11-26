@@ -1,5 +1,9 @@
 package app.autplay.application.server
 
+import app.autplay.application.library.WelcomeArtist
+import app.autplay.application.library.ExternalCollection
+import app.autplay.application.library.PlaylistImportFile
+import app.autplay.application.library.SharedPlaylist
 import app.autplay.application.recommendation.PersonalWaveSession
 import app.autplay.application.recommendation.LIKED_ORIGINAL_VERSION
 import app.autplay.data.security.CredentialStore
@@ -18,8 +22,10 @@ import java.time.Duration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -226,6 +232,12 @@ class ServerFeatureRepository(
             expectBody = true, binary = true).bytes)
     }
 
+    suspend fun catalogArtistPortrait(id: String): ByteArray {
+        catalogueUuid(id)
+        return checkNotNull(authorizedRaw(Request.Builder().url("$apiBaseUrl/music/discovery/artists/$id/portrait").get().build(),
+            expectBody = true, binary = true).bytes)
+    }
+
     suspend fun metadataArtwork(refId: String, sha: String): ByteArray {
         requireUuidLike(refId)
         require(SHA256_REGEX.matches(sha))
@@ -268,10 +280,71 @@ class ServerFeatureRepository(
             root.optionalString("user_track_ref_id", UUID_TEXT_LENGTH), root.optionalString("audio_variant_id", UUID_TEXT_LENGTH))
     }
 
+    suspend fun artistWelcomePending(): Boolean =
+        authorized(Request.Builder().url("$apiBaseUrl/artist-onboarding").get().build())
+            .jsonObject.getValue("pending").jsonPrimitive.boolean
+
+    suspend fun welcomeArtists(parent: String?, query: String, seen: List<String>): List<WelcomeArtist> =
+        WelcomeArtist.decode(musicPost("/artist-onboarding/browse", WelcomeArtist.browse(parent, query, seen)))
+
+    suspend fun finishArtistWelcome(selected: List<String>) {
+        musicPost("/artist-onboarding/finish", WelcomeArtist.choices(selected))
+    }
+
+    suspend fun startCollection(link: String, favorites: Boolean, operation: String, newCopy: Boolean): ExternalCollection =
+        ExternalCollection.decode(musicPost("/collection-imports", ExternalCollection.startBody(link, favorites, operation, newCopy)))
+
+    suspend fun resumeCollection(operation: String): ExternalCollection {
+        requireUuidLike(operation)
+        return ExternalCollection.decode(musicPost("/collection-imports/$operation/resume", JsonObject(emptyMap())))
+    }
+
+    suspend fun confirmCollection(preview: ExternalCollection): ExternalCollection =
+        ExternalCollection.decode(musicPost("/collection-imports/${preview.operation}/confirm",
+            buildJsonObject { put("revision", preview.revision); preview.selectionKey?.let { put("selection_key", it) } }))
+
+    suspend fun collectionPage(operation: String, offset: Int): ExternalCollection {
+        requireUuidLike(operation)
+        require(offset in 0..10000)
+        val request = Request.Builder().url("$apiBaseUrl/collection-imports/$operation?offset=$offset").get().build()
+        return ExternalCollection.decode(authorized(request).jsonObject)
+    }
+
+    suspend fun cancelCollection(operation: String): ExternalCollection {
+        requireUuidLike(operation)
+        return ExternalCollection.decode(musicPost("/collection-imports/$operation/cancel", JsonObject(emptyMap())))
+    }
+
+    suspend fun recentCollections(): List<Pair<String, String>> =
+        authorized(Request.Builder().url("$apiBaseUrl/collection-imports").get().build()).jsonObject
+            .getValue("imports").jsonArray.map { it.jsonObject.run {
+                getValue("operation_id").jsonPrimitive.content to getValue("name").jsonPrimitive.content
+            } }
+
     suspend fun publishPlaylist(snapshot: JsonObject): String {
         val result = musicPost("/playlist-shares", snapshot)
         val token = java.util.UUID.fromString(result.getValue("token").jsonPrimitive.content)
         return "$apiBaseUrl/playlist-shares/$token"
+    }
+
+    suspend fun openPlaylistLink(value: String): PlaylistImportFile {
+        val url = value.trim().toHttpUrl()
+        val configured = apiBaseUrl.toHttpUrl()
+        val sameServer = url.scheme == configured.scheme && url.host == configured.host && url.port == configured.port
+        require((sameServer || url.isHttps) && url.username.isEmpty() && url.password.isEmpty() &&
+            url.query == null && url.fragment == null)
+        val path = url.encodedPath.trimEnd('/').removeSuffix("/file")
+        val token = java.util.UUID.fromString(path.substringAfterLast('/')).toString()
+        require(path.endsWith("/api/v1/playlist-shares/$token"))
+        val document = client.newCall(Request.Builder().url(url.newBuilder().encodedPath("$path/file").build())
+            .get().build()).readCancellable { response ->
+            require(response.isSuccessful)
+            SharedPlaylist.decode(response.body.readBoundedBytes(SharedPlaylist.MAX_FILE_BYTES))
+        }
+        require(document.token == token)
+        val copy = PlaylistImportFile(document)
+        return if (sameServer && path == configured.encodedPath + "/playlist-shares/$token") copy
+            else copy.copy(shareToken = null, tracks = copy.tracks.map { it.copy(recordingId = null) })
     }
 
     private suspend fun musicPost(path: String, body: JsonObject): JsonObject = authorized(Request.Builder()
@@ -297,6 +370,16 @@ class ServerFeatureRepository(
     override suspend fun discoveryReleaseTracks(id: String, limit: Int, offset: Int): InternetMetadataDiscoveryPage =
         discoveryTracks("releases", id, limit, offset)
 
+    suspend fun albumTracklist(mbid: String?, discogsId: String?, title: String?, artist: String?, year: String?): AlbumTracklist {
+        val url = "$apiBaseUrl/music/discovery/album-tracklist".toHttpUrl().newBuilder()
+        mbid?.let { url.addQueryParameter("mbid", it) }
+        discogsId?.let { url.addQueryParameter("discogs_id", it) }
+        title?.let { url.addQueryParameter("title", it.take(500)) }
+        artist?.let { url.addQueryParameter("artist", it.take(500)) }
+        year?.let { url.addQueryParameter("year", it) }
+        return decodeAlbumTracklist(authorized(Request.Builder().url(url.build()).get().build()).jsonObject)
+    }
+
     private suspend fun discoveryTracks(collection: String, id: String, limit: Int, offset: Int, resource: String = "tracks"): InternetMetadataDiscoveryPage {
         catalogueUuid(id)
         require(limit in 1..50 && offset in 0..1_000_000)
@@ -305,8 +388,20 @@ class ServerFeatureRepository(
         return discoveryPage(Request.Builder().url(url).get().build())
     }
 
-    private suspend fun discoveryPage(request: Request): InternetMetadataDiscoveryPage =
-        InternetMetadataDiscoveryCodec.decode(authorizedRaw(request, expectBody = true).body ?: error("SERVER_RESPONSE_INVALID"))
+    private suspend fun discoveryPage(request: Request): InternetMetadataDiscoveryPage {
+        var attempts = 0
+        while (true) {
+            try {
+                val body = authorizedRaw(request, expectBody = true).body ?: error("SERVER_RESPONSE_INVALID")
+                return InternetMetadataDiscoveryCodec.decode(body)
+            } catch (failure: ServerFeatureHttpException) {
+                if (failure.retryable == false || failure.errorCode !in setOf("music_discovery_busy", "music_catalogue_busy") ||
+                    attempts >= 2) throw failure
+                attempts++
+                kotlinx.coroutines.delay(attempts * 2_000L)
+            }
+        }
+    }
 
     suspend fun catalogDownloadPreview(operation: String, kind: String, id: String, alternatives: Boolean): JsonObject {
         catalogueUuid(operation)
@@ -326,6 +421,13 @@ class ServerFeatureRepository(
         }
     }
 
+    suspend fun artistOverview(artistId: String, baseline: String?): JsonObject {
+        catalogueUuid(artistId)
+        val url = "$apiBaseUrl/music/discovery/artists/$artistId/overview".toHttpUrl().newBuilder()
+        if (baseline != null) url.addQueryParameter("baseline", catalogueUuid(baseline))
+        return authorized(Request.Builder().url(url.build()).get().build()).jsonObject
+    }
+
     suspend fun artistRanking(artistId: String): JsonObject {
         catalogueUuid(artistId)
         val result = authorized(Request.Builder().url("$apiBaseUrl/music/discovery/library-artists/$artistId/ranking").get().build()).jsonObject
@@ -336,11 +438,27 @@ class ServerFeatureRepository(
     override suspend fun catalogueTrackReference(contextId: String): CatalogueTrackReference {
         catalogueUuid(contextId)
         val root = musicPost("/music/discovery/contexts/$contextId/track-reference", buildJsonObject {})
-        return CatalogueTrackReference(catalogueUuid(root.requiredString("user_track_ref_id", UUID_TEXT_LENGTH)),
+        return decodeCatalogueReference(root)
+    }
+
+    internal suspend fun catalogDownloadFiles(operation: String, offset: Int): CatalogDevicePage {
+        catalogueUuid(operation)
+        val root = musicPost("/music/discovery/downloads/$operation/device-files?offset=$offset", buildJsonObject {})
+        val files = root.getValue("files").jsonArray.map { value ->
+            val file = value.jsonObject
+            decodeCatalogueReference(file) to catalogueUuid(file.requiredString("audio_variant_id", UUID_TEXT_LENGTH))
+        }
+        val unavailable = root.getValue("unavailable").jsonArray.size
+        val next = root.getValue("next_offset").jsonPrimitive.intOrNull
+        check(files.size + unavailable <= 50 && (next == null || next == offset + 50))
+        return CatalogDevicePage(files, unavailable, next)
+    }
+
+    private fun decodeCatalogueReference(root: JsonObject): CatalogueTrackReference =
+        CatalogueTrackReference(catalogueUuid(root.requiredString("user_track_ref_id", UUID_TEXT_LENGTH)),
             root.requiredLong("row_version"), root.optionalString("recording_id", UUID_TEXT_LENGTH)?.let(::catalogueUuid),
             root.requiredString("title", 2000), root.optionalString("artist", 2000), root.optionalString("album", 2000),
             root["duration_ms"]?.jsonPrimitive?.longOrNull, root.requiredString("resolution_status", 80))
-    }
 
     override suspend fun createMusicCatalogueContext(selection: MusicCatalogueContextRequest): MusicCatalogueContext {
         val request = Request.Builder().url("$apiBaseUrl/music/discovery/contexts")
