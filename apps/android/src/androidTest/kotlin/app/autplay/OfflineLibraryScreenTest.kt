@@ -538,7 +538,9 @@ class OfflineLibraryScreenTest {
             swipeUp(startY = center.y)
         }
         saveUiScreenshot("track-row-library")
-        composeRule.onNodeWithTag("library-track-$TRACK").performClick()
+        // Tap the track title. On compact screens the middle of the row can be a download button.
+        val title = hasText("Offline sample") and hasAnyAncestor(hasTestTag("library-track-$TRACK"))
+        composeRule.onNode(title, useUnmergedTree = true).performTouchInput { click() }
 
         composeRule.waitUntil(timeoutMillis = 10_000) {
             runBlocking {
