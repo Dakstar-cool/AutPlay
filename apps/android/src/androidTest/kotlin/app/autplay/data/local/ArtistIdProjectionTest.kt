@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -234,7 +235,7 @@ class ArtistIdProjectionTest {
             val songs = port.allAppearances(artist.key)
             assertEquals(setOf("song-0", "song-1", "song-2", "song-3"), songs.map { it.title }.toSet())
             val duet = songs.single { it.title == "song-2" }
-            assertTrue(duet.guest)
+            assertFalse(duet.guest)
             val partner = duet.performers.single { it.name == "Грязь" }
             assertEquals(listOf("song-2"), port.allAppearances(partner.key).map { it.title })
             assertEquals(duet.performers.map { it.key }.toSet(), port.observeTrackArtists(profile, "song-2").first().map { it.key }.toSet())

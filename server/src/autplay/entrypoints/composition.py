@@ -1007,12 +1007,12 @@ def build_recommendation_service(
             raise ValueError("native capture requires shared training consent authority")
         capture = SqlAlchemySonaNativeCapture(consent)
     runtime = SqlAlchemyRecommendationRuntime(
-        sessions, native_capture=capture, snapshot_policy_version="2"
+        sessions, native_capture=capture, snapshot_policy_version="3"
     )
     return RecommendationService(
         snapshots=runtime,
         traces=runtime,
-        registry=StaticRecommendationVersionRegistry(baseline_pipeline_definition("2")),
+        registry=StaticRecommendationVersionRegistry(baseline_pipeline_definition("3")),
         ids=Uuid7Generator().new,
         clock=SystemClock().now,
         packs=SqlAlchemyOfflinePackRepository(runtime),

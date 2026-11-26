@@ -11,9 +11,11 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Request
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 
 from autplay.application.sona_collection import SonaCollectionService
+from autplay.application.vault_name_jobs import VaultNameJobs
 from autplay.application.web_admin import LoginChallenge
 from autplay.domain.admin_commands import AdminCommand
 from autplay.domain.admin_views import (
@@ -243,6 +245,7 @@ def create_admin_web_router(
     acquisition_enabled: bool = False,
     discovery_automation_enabled: bool = False,
     sona_collection: SonaCollectionService | None = None,
+    name_jobs: VaultNameJobs | None = None,
     device_admission: DeviceAdmissionWebHttp | None = None,
     passkeys_enabled: bool = False,
 ) -> APIRouter:
@@ -467,22 +470,70 @@ def create_admin_web_router(
         locale = resolve_locale(
             request.query_params.get("lang"), request.headers.get("accept-language")
         )
+        health_only = request.query_params.get("fragment") == "health"
+        name_status = None
+        can_normalize = name_jobs is not None and actor.role == AccountRole.OWNER
+        if not health_only and name_jobs is not None:
+            try:
+                name_status = name_jobs.latest()
+            except SQLAlchemyError:
+                name_status = {"state": "UNAVAILABLE"}
+                can_normalize = False
         value = response(
             render(
-                "dashboard_health.html"
-                if request.query_params.get("fragment") == "health"
-                else "dashboard.html",
+                "dashboard_health.html" if health_only else "dashboard.html",
                 request,
                 authenticated=True,
                 navigation=admin_navigation("dashboard"),
                 web_origin=origin,
                 mobile_api_origin=mobile_api_origin,
+                name_status=name_status,
+                can_normalize=can_normalize,
+                can_download=acquisition_enabled and actor.role == AccountRole.OWNER,
+                csrf_token=encode_request_integrity_token(authenticated.csrf),
+                normalize_operation_id=str(uuid4()),
+                download_operation_id=str(uuid4()),
                 **dashboard_context(dashboard_value, actor, locale=locale),
             )
         )
         if authenticated.rotated_bearer is not None:
             cookies.set_session(value, authenticated.rotated_bearer.decode(), max_age=1800)
         return value
+
+    @router.post("/operations/normalize-names")
+    async def normalize_names(request: Request) -> Response:
+        if name_jobs is None:
+            return error("unavailable", 503)
+        try:
+            require_exact_origin(request.scope, origin)
+            form = parse_urlencoded_form(
+                request.headers.get("content-type"),
+                await request.body(),
+                allowed_fields=frozenset({"csrf_token", "operation_id"}),
+            )
+            operation = UUID(form["operation_id"])
+            authenticated = web.authenticate(
+                request.cookies.get(cookies.session_name, "").encode(), mutation=True
+            )
+            web.validate_csrf(
+                authenticated.actor, decode_request_integrity_token(form["csrf_token"]), operation
+            )
+            if authenticated.actor.role != AccountRole.OWNER:
+                raise WebAdminError("forbidden")
+            await run_in_threadpool(name_jobs.request, authenticated.actor, operation)
+        except WebAdminError as failure:
+            if failure.code != "normalization_active":
+                return error("forbidden", 403)
+        except ValueError, KeyError:
+            return error("forbidden", 403)
+        except SQLAlchemyError:
+            return error("unavailable", 503)
+        locale = resolve_locale(
+            request.query_params.get("lang"), request.headers.get("accept-language")
+        )
+        return apply_admin_security_headers(
+            RedirectResponse(f"/admin/?lang={locale}#music-operations", status_code=303)
+        )
 
     @router.head("/", include_in_schema=False)
     def dashboard_head(request: Request) -> Response:

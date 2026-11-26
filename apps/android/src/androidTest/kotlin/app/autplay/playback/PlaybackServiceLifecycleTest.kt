@@ -128,7 +128,7 @@ class PlaybackServiceLifecycleTest {
             fun feedbackActions() = platform.playbackState?.customActions.orEmpty().filter { it.action in feedback }
             fixture.await { feedbackActions().size == 2 }
             val actions = feedbackActions()
-            assertEquals(listOf(PlaybackNotification.ACTION_LIKE, PlaybackNotification.ACTION_DISLIKE), actions.map { it.action })
+            assertEquals(listOf(PlaybackNotification.ACTION_DISLIKE, PlaybackNotification.ACTION_LIKE), actions.map { it.action })
             actions.forEach {
                 assertTrue(it.icon != 0)
                 assertEquals(fixture.entries[0].value, it.extras?.getString(PlaybackNotification.EXTRA_QUEUE_ENTRY_ID))

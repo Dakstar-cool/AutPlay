@@ -15,7 +15,7 @@ from sqlalchemy.exc import (
     TimeoutError,
 )
 
-EXPECTED_MIGRATION_HEAD: Final = "0079_music_preservation"
+EXPECTED_MIGRATION_HEAD: Final = "0081_artist_onboarding"
 
 
 @dataclass(frozen=True, slots=True)

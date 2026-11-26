@@ -13,8 +13,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.first
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyRow
@@ -91,6 +99,8 @@ public data class CoreProductDetailUiState(
     public val moreArtistAlbums: Boolean = false,
     public val moreArtistRecordings: Boolean = false,
     public val expandArtistCatalog: () -> Unit = {},
+    public val navigationDepth: Int = 0,
+    public val albumTracklist: AlbumTracklistState? = null,
 )
 
 @Composable
@@ -117,6 +127,7 @@ public fun CoreProductDetailScreen(
     var addTrackToPlaylistId by remember { mutableStateOf<String?>(null) }
     var trackLimit by rememberSaveable(state.target?.stableId) { androidx.compose.runtime.mutableIntStateOf(25) }
     var selectedCard by remember(state.target) { mutableStateOf<InternetMetadataDiscoveryCard?>(null) }
+    var showCatalogueActions by rememberSaveable(state.target?.stableId) { mutableStateOf(false) }
     selectedCard?.let { card ->
         AutPlayDialog(onDismissRequest = { selectedCard = null }, title = { Text(card.title) }, text = {
             androidx.compose.foundation.lazy.LazyColumn {
@@ -144,8 +155,39 @@ public fun CoreProductDetailScreen(
     var heardLimit by rememberSaveable(state.target?.stableId) { androidx.compose.runtime.mutableIntStateOf(5) }
     val catalogVisits = remember { android.util.LruCache<CatalogArtistVisitKey, CatalogArtistVisit>(8) }
     val viewStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
-    viewStates.SaveableStateProvider("${state.target?.kind}:${state.target?.stableId}") {
-    val listState = rememberLazyListState()
+    val depth = state.navigationDepth
+    var lastDepth by rememberSaveable { mutableIntStateOf(depth) }
+    SideEffect {
+        for (popped in (depth + 1)..lastDepth) viewStates.removeState(popped)
+        lastDepth = depth
+    }
+    viewStates.SaveableStateProvider(depth) {
+    if (state.target?.kind == DetailKind.ArtistAlbums && state.artist != null && !state.loading && !state.error) {
+        LazyVerticalGrid(columns = GridCells.Adaptive(132.dp),
+            state = key(state.target.stableId) { rememberLazyGridState() },
+            modifier = Modifier.padding(contentPadding).fillMaxWidth().testTag("collection-details"),
+            contentPadding = PaddingValues(AutPlayTokens.dimensions.screenPadding),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                DetailHeading(stringResource(R.string.library_section_albums), state.artist.summary.name)
+            }
+            gridItems(albums, key = { it.key }) { album ->
+                ArtistAlbumCover(album, state.albumArtwork, Modifier.fillMaxWidth(), onOpenDetail)
+            }
+            if (albums.isEmpty() && !state.albumsIncomplete) item(span = { GridItemSpan(maxLineSpan) }) {
+                if (state.albumsLoading) AutPlayStateSurface(AutPlayStateKind.Loading, stringResource(R.string.detail_loading))
+                else Text(stringResource(R.string.library_collection_empty))
+            }
+            if (state.albumsIncomplete) item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    CatalogueErrorText("music_catalogue_unavailable")
+                    OutlinedButton(onClick = state.retryAlbums) { Text(stringResource(R.string.music_retry)) }
+                }
+            }
+        }
+        return@SaveableStateProvider
+    }
+    val listState = key(state.target?.kind, state.target?.stableId) { rememberLazyListState() }
     if (state.target?.kind == DetailKind.Artist && state.artist != null && state.serverOverview == null && (state.moreArtistAlbums || state.moreArtistRecordings)) {
         LaunchedEffect(listState) {
             snapshotFlow {
@@ -170,9 +212,20 @@ public fun CoreProductDetailScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         when {
+            state.target?.kind == DetailKind.CatalogRelease && state.albumTracklist != null && !showCatalogueActions -> {
+                item {
+                    state.target.label?.let { DetailHeading(it, state.target.albumArtist) }
+                    CollectionLike(state)
+                    OutlinedButton(onClick = { showCatalogueActions = true }) { Text(stringResource(R.string.album_catalog_actions)) }
+                }
+                albumTracklistItems(state.albumTracklist, emptyMap(), {}, {})
+            }
             state.target?.kind == DetailKind.CatalogRelease || state.target?.kind == DetailKind.CatalogArtistTracks -> item {
                 val target = requireNotNull(state.target)
                 val release = target.kind == DetailKind.CatalogRelease
+                if (release && state.albumTracklist != null) {
+                    OutlinedButton(onClick = { showCatalogueActions = false }) { Text(stringResource(R.string.catalog_edition_tracks)) }
+                }
                 if (!release && !target.label.isNullOrBlank()) {
                     val overview = state.serverOverview
                     if (overview != null || state.overviewLoading) {
@@ -187,7 +240,7 @@ public fun CoreProductDetailScreen(
                     onOpenCatalog = onOpenDetail, artistVisits = catalogVisits,
                     onPlayHeardTrack = onPlayTrack,
                     artistOverview = state.serverOverview, overviewLoading = state.overviewLoading,
-                    initialTarget = InternetMetadataBrowseTarget(
+                    initialTitle = target.label, initialTarget = InternetMetadataBrowseTarget(
                         if (release) InternetMetadataDiscoveryEntity.RELEASE else InternetMetadataDiscoveryEntity.ARTIST, target.stableId))
             }
             state.loading -> item {
@@ -210,9 +263,10 @@ public fun CoreProductDetailScreen(
                     )
                 }
                 detail.albumName?.let { album -> item { DetailValue(stringResource(R.string.detail_album), album) } }
-                detail.metadata?.text("mb_recording_id")?.let { id ->
+                if (CoreTrackDetailCapability.DOWNLOAD !in detail.capabilities && detail.availability != CoreTrackAvailability.PLAYABLE_LOCAL)
+                    detail.metadata?.text("mb_recording_id")?.let { id ->
                     if (runCatching { java.util.UUID.fromString(id).toString() }.getOrNull() == id)
-                        item { CatalogDownloadAction("recording", id) }
+                        item { CatalogDownloadAction("recording", id, detail.title) }
                 }
                 item(key = "track-metadata") { TrackMetadataPanel(detail) }
                 detail.durationMs?.let { duration -> item { DetailValue(stringResource(R.string.detail_duration), formatDuration(duration)) } }
@@ -255,12 +309,10 @@ public fun CoreProductDetailScreen(
                         ) { Text(stringResource(R.string.queue_add_to_end)) }
                     }
                 }
-                if (CoreTrackDetailCapability.DOWNLOAD in detail.capabilities) {
+                if (CoreTrackDetailCapability.DOWNLOAD in detail.capabilities || detail.availability == CoreTrackAvailability.PLAYABLE_LOCAL) {
                     item {
-                        OutlinedButton(
-                            onClick = { onDownload(detail.localUserTrackRefId) },
-                            modifier = Modifier.heightIn(min = 48.dp),
-                        ) { Text(stringResource(R.string.action_download)) }
+                        app.autplay.ui.downloads.InlineTrackDownload(detail.localUserTrackRefId,
+                            detail.availability == CoreTrackAvailability.PLAYABLE_LOCAL) { onDownload(detail.localUserTrackRefId) }
                     }
                 }
                 if (CoreTrackDetailCapability.REAUTHORIZE_LIBRARY_ROOT in detail.capabilities) {
@@ -337,20 +389,32 @@ public fun CoreProductDetailScreen(
                 }
                 val artist = state.subjectArtistCredits.singleOrNull()?.members?.singleOrNull()
                 item(key = "release-header") {
-                    CollectionDetailHeader(detail.title, detail.artistName, detail.releaseDateText, detail.tracks.size,
+                    CollectionDetailHeader(detail.title, detail.artistName, releaseYear(detail.releaseDateText), (state.albumTracklist?.result?.tracks?.size?.takeIf { it > 0 } ?: detail.tracks.size).takeIf { it > 0 },
                         detail.artworkTrackId, onListen = first?.let { { play(it) } }, catalogCoverId = detail.releaseMbid,
-                        onOpenArtist = artist?.let { { onOpenDetail(DetailTarget(DetailKind.Artist, it.artistId.value)) } })
+                        onOpenArtist = artist?.let { { onOpenDetail(DetailTarget(DetailKind.Artist, it.artistId.value)) } }) {
+                        if (detail.releaseMbid != null) CatalogDownloadAction("release", detail.releaseMbid, detail.title)
+                        else CatalogDownloadAction("library_release", detail.localReleaseId, detail.title,
+                            tracks = remember(detail.tracks) { detail.tracks.map { it.localUserTrackRefId } })
+                    }
                 }
                 item { CollectionLike(state) }
                 detail.releaseMbid?.let { mbid ->
                     item {
-                        OutlinedButton(onClick = { onOpenDetail(DetailTarget(DetailKind.CatalogRelease, mbid)) }) {
-                            Text(stringResource(R.string.catalog_edition_tracks))
+                        OutlinedButton(onClick = { showCatalogueActions = !showCatalogueActions }) {
+                            Text(stringResource(if (showCatalogueActions) R.string.catalog_edition_tracks else R.string.album_catalog_actions))
                         }
+                        if (showCatalogueActions) InternetMetadataDiscoverySection(detail.title, LibrarySearchKind.Album, 1,
+                            onPlaylistTrack = { addTrackToPlaylistId = it }, onOpenCatalog = onOpenDetail,
+                            initialTitle = detail.title, initialTarget = InternetMetadataBrowseTarget(InternetMetadataDiscoveryEntity.RELEASE, mbid))
                     }
-                    item { CatalogDownloadAction("release", mbid) }
                 }
-                itemsIndexed(detail.tracks, key = { _, track -> track.localReleaseTrackId }) { index, track ->
+                val online = state.albumTracklist
+                val linked = localEditionRows(online?.result, detail.tracks)
+                if (online != null) albumTracklistItems(online, linked, ::play) { addTrackToPlaylistId = it }
+                val represented = linked.values.mapTo(mutableSetOf()) { it.localReleaseTrackId }
+                val remaining = detail.tracks.filterNot { it.localReleaseTrackId in represented }
+                if (online?.result?.edition != null && remaining.isNotEmpty()) item { DetailSectionHeading(stringResource(R.string.album_local_tracks)) }
+                itemsIndexed(remaining, key = { _, track -> track.localReleaseTrackId }) { index, track ->
                     CollectionTrackRow(track.numberText ?: (track.sequenceNo ?: index + 1).toString(), track.title,
                         track.artistName, track.durationMs, track.localUserTrackRefId?.let { { play(track) } },
                         "album-track-${track.localReleaseTrackId}",
@@ -364,7 +428,6 @@ public fun CoreProductDetailScreen(
                 val tracks = if (collaborations) guests else recordings
                 val kind = state.target?.kind
                 val allTracks = kind == DetailKind.ArtistTracks || collaborations
-                val allAlbums = kind == DetailKind.ArtistAlbums
                 fun openList(list: DetailKind) = onOpenDetail(DetailTarget(list, detail.summary.key.artistId.value))
                 @Composable fun trackRow(row: ArtistRecording, modifier: Modifier = Modifier, section: String = "artist") {
                     val track = row.local?.localTarget as? ArtistLocalTarget.Track
@@ -375,17 +438,10 @@ public fun CoreProductDetailScreen(
                             stringResource(R.string.artist_track_heard) else null,
                         modifier = modifier.testTag("$section-track-${row.displayKey}"),
                         artistLinks = if (performers.size > 1 || row.catalogPerformers.size > 1) { {
-                            FlowRow {
-                                if (performers.size > 1) performers.forEach { performer ->
-                                    androidx.compose.material3.TextButton(onClick = {
-                                        onOpenDetail(DetailTarget(DetailKind.Artist, performer.key.artistId.value))
-                                    }) { Text(performer.name) }
-                                } else row.catalogPerformers.forEach { (id, name) ->
-                                    androidx.compose.material3.TextButton(onClick = {
-                                        onOpenDetail(DetailTarget(DetailKind.CatalogArtistTracks, id, name))
-                                    }) { Text(name) }
-                                }
-                            }
+                            val links = if (performers.size > 1) performers.map {
+                                it.name to DetailTarget(DetailKind.Artist, it.key.artistId.value)
+                            } else row.catalogPerformers.map { (id, name) -> name to DetailTarget(DetailKind.CatalogArtistTracks, id, name) }
+                            ArtistCreditLine(links, onOpenDetail)
                         } } else null,
                         actions = row.card?.takeIf { track == null }?.let { card -> {
                             androidx.compose.material3.TextButton(onClick = { selectedCard = card }) {
@@ -393,31 +449,19 @@ public fun CoreProductDetailScreen(
                             }
                         } })
                 }
-                @Composable fun albumTile(album: ArtistAlbumTile, modifier: Modifier, section: String = "artist") {
-                    CollectionCoverTile(album.title ?: stringResource(R.string.detail_artist_release),
-                        state.albumArtwork[album.localId], album.date, modifier.testTag("$section-album-${album.key}"),
-                        enabled = album.target != null, catalogCoverId = album.mbid) {
-                        album.target?.let(onOpenDetail)
-                    }
-                }
-                if (allTracks || allAlbums) {
-                    item { DetailHeading(stringResource(when { collaborations -> R.string.catalog_guest_tracks; allTracks -> R.string.catalog_popular_tracks; else -> R.string.library_section_albums }), detail.summary.name) }
-                    if ((allTracks && state.recordingsLoading && tracks.isEmpty()) || (allAlbums && state.albumsLoading && albums.isEmpty())) {
+                if (allTracks) {
+                    item { DetailHeading(stringResource(if (collaborations) R.string.catalog_guest_tracks else R.string.catalog_popular_tracks), detail.summary.name) }
+                    if (state.recordingsLoading && tracks.isEmpty()) {
                         item { AutPlayStateSurface(AutPlayStateKind.Loading, stringResource(R.string.detail_loading)) }
                         return@LazyColumn
                     }
-                    if (allTracks) items(tracks.take(trackLimit), key = { it.displayKey }) { trackRow(it) }
-                    else items(albums, key = { it.key }) { albumTile(it, Modifier.width(180.dp)) }
-                    if (allTracks && tracks.size > trackLimit) item {
+                    items(tracks.take(trackLimit), key = { it.displayKey }) { trackRow(it) }
+                    if (tracks.size > trackLimit) item {
                         OutlinedButton(onClick = { trackLimit += 25 }, modifier = Modifier.testTag("artist-tracks-more")) {
                             Text(stringResource(R.string.music_catalogue_more))
                         }
                     }
-                    if (allAlbums && state.albumsIncomplete) item {
-                        CatalogueErrorText("music_catalogue_unavailable")
-                        OutlinedButton(onClick = state.retryAlbums) { Text(stringResource(R.string.music_retry)) }
-                    }
-                    if (allTracks && state.recordingsIncomplete) item {
+                    if (state.recordingsIncomplete) item {
                         CatalogueErrorText("music_catalogue_unavailable")
                         OutlinedButton(onClick = state.retryRecordings) { Text(stringResource(R.string.music_retry)) }
                     }
@@ -445,13 +489,13 @@ public fun CoreProductDetailScreen(
                     }
                 }
                 item {
-                    if (state.artistMbid != null) CatalogDownloadAction("artist", state.artistMbid)
+                    if (state.artistMbid != null) CatalogDownloadAction("artist", state.artistMbid, detail.summary.name)
                     else {
                         var choose by rememberSaveable(detail.summary.key.artistId.value) { mutableStateOf(false) }
                         OutlinedButton(onClick = { choose = !choose }) { Text(stringResource(R.string.catalog_download_artist)) }
                         if (choose) {
                             Text(stringResource(R.string.catalog_download_library_scope))
-                            InternetMetadataDiscoverySection(detail.summary.name, LibrarySearchKind.Artist, 1, onOpenCatalog = onOpenDetail)
+                            InternetMetadataDiscoverySection(detail.summary.name, LibrarySearchKind.Artist, 1, selectArtistForDownload = true)
                         }
                     }
                 }
@@ -460,7 +504,7 @@ public fun CoreProductDetailScreen(
                     (state.moreArtistAlbums && state.serverOverview?.latestComplete != true) || state.albumsLoading || state.albumsIncomplete
                 }?.let { latest ->
                     item { DetailSectionHeading(stringResource(R.string.catalog_latest_release)) }
-                    item { albumTile(latest, Modifier.width(180.dp), "latest") }
+                    item { ArtistAlbumCover(latest, state.albumArtwork, Modifier.width(180.dp), onOpenDetail, "latest") }
                 }
                 if (state.recordingsLoading && tracks.isEmpty()) {
                     item { AutPlayStateSurface(AutPlayStateKind.Loading, stringResource(R.string.detail_loading)) }
@@ -470,7 +514,7 @@ public fun CoreProductDetailScreen(
                     item {
                         LazyRow(modifier = Modifier.testTag("artist-track-preview"), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             items(tracks.take(12).chunked(3), key = { it.first().displayKey }) { column ->
-                                Column(Modifier.width(248.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Column(Modifier.fillParentMaxWidth(.9f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     column.forEach { trackRow(it) }
                                 }
                             }
@@ -485,7 +529,7 @@ public fun CoreProductDetailScreen(
                     item { CollectionListHeading(stringResource(R.string.library_section_albums)) { openList(DetailKind.ArtistAlbums) } }
                     item {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            items(albums.take(4), key = { it.key }) { albumTile(it, Modifier.width(148.dp)) }
+                            items(albums.take(4), key = { it.key }) { ArtistAlbumCover(it, state.albumArtwork, Modifier.width(148.dp), onOpenDetail) }
                         }
                     }
                 }
@@ -538,6 +582,8 @@ public fun CoreProductDetailScreen(
                 item(key = "playlist-header") {
                     CollectionDetailHeader(detail.name, detail.description, null, detail.entries.size, detail.artworkTrackId,
                         onListen = first?.let { { onPlayPlaylistEntry(it.localPlaylistEntryId) } }) {
+                        CatalogDownloadAction("playlist", detail.localPlaylistId, detail.name,
+                            tracks = remember(detail.entries) { detail.entries.map { entry -> entry.localUserTrackRefId.takeUnless { entry.unavailable } } })
                         if (detail.playlistType == "MANUAL") {
                             OutlinedButton(onClick = { editing = !editing }, modifier = Modifier.testTag("playlist-toggle-edit")) {
                                 Text(stringResource(if (editing) R.string.detail_finish_edit else R.string.action_edit))
@@ -684,6 +730,14 @@ private fun ArtistAppearanceCard(
 internal fun ArtistLocalTarget.toDetailTarget(): DetailTarget = when (this) {
     is ArtistLocalTarget.Track -> DetailTarget(DetailKind.Track, localUserTrackRefId)
     is ArtistLocalTarget.Release -> DetailTarget(DetailKind.Release, localReleaseId)
+}
+
+@Composable
+private fun ArtistAlbumCover(album: ArtistAlbumTile, artwork: Map<String, String?>, modifier: Modifier,
+    open: (DetailTarget) -> Unit, section: String = "artist") {
+    CollectionCoverTile(album.title ?: stringResource(R.string.detail_artist_release),
+        artwork[album.localId] ?: album.artworkTrackId, releaseYear(album.date), modifier.testTag("$section-album-${album.key}"),
+        enabled = album.target != null, catalogCoverId = album.mbid) { album.target?.let(open) }
 }
 
 @Composable

@@ -1060,16 +1060,6 @@ class SyncService:
                 updated_at=now,
             )
             session.add(entry)
-            if payload.get("playlist_import") is True:
-                from autplay.application.playlist_vault import enqueue_playlist_track
-
-                enqueue_playlist_track(
-                    session,
-                    principal.user_id,
-                    playlist_id,
-                    ref_id,
-                    complete=payload.get("playlist_import_complete") is True,
-                )
         else:
             if entry.playlist_id != playlist.playlist_id:
                 raise _ProjectionConflict
@@ -1976,9 +1966,13 @@ def _bootstrap_projections(
             .where(UserTrackRefRow.user_id == user_id, UserTrackRefRow.deleted_at.is_(None))
         )
     }
-    from autplay.adapters.postgresql.shared_catalog import playlist_catalog_handles
+    from autplay.adapters.postgresql.shared_catalog import (
+        playlist_catalog_handles,
+        published_playback_handles,
+    )
 
     catalog_handles = playlist_catalog_handles(session, user_id) if include_editions else {}
+    catalog_handles.update(published_playback_handles(session, user_id))
     for ref_row in session.scalars(
         select(UserTrackRefRow).where(
             UserTrackRefRow.user_id == user_id, UserTrackRefRow.deleted_at.is_(None)

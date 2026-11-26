@@ -4,10 +4,40 @@ import java.text.Normalizer
 import java.util.Locale
 
 private val spaces = Regex("[\\s\\p{Z}]+")
+private const val site = """(?:https?://)?(?:www\.)?(?:muzmo\.ru|hitmos?(?:\.(?:ru|me|top|net|com|fm))?|lightaudio\.ru|mp3on\.net|zaycev\.net)/?"""
+private val siteHint = Regex("muzmo|hitmo|lightaudio|mp3on|zaycev", RegexOption.IGNORE_CASE)
+private val siteGroup = Regex("""\[\s*$site\s*]|\(\s*$site\s*\)""", RegexOption.IGNORE_CASE)
+private val siteTag = "(?:${siteGroup.pattern}|$site)"
+private const val siteJoin = """(?:\s*[,;|_]\s*|\s+[-–—]\s+|\s+)"""
+private val siteEdges = Regex("""^(?:$siteTag(?:$siteJoin|$))+|(?:(?:$siteJoin)$siteTag)+$""", RegexOption.IGNORE_CASE)
+
+private val siteBetween = Regex("""$siteJoin$siteTag(?=$siteJoin)""", RegexOption.IGNORE_CASE)
+
+internal fun stripSourceSite(value: String): String {
+    if (!siteHint.containsMatchIn(value)) return value
+    val name = value.trim()
+    val extension = audioExtension.find(name)?.value.orEmpty()
+    val stem = name.removeSuffix(extension).replace(siteEdges, "").replace(siteBetween, "").replace(siteGroup, " ")
+    return musicDisplayTitle(stem).let { if (it.isEmpty()) it else it + extension }
+}
 private val bandAlias = Regex("""25\s*(?:[/‐‑–—-]|\s)\s*17""")
 private val bandInCredit = Regex("""(?<![\p{L}\p{N}_])25\s*(?:[/‐‑–—-]|\s)\s*17(?![\p{L}\p{N}_])""")
 private val separators = Regex("""\s*[,;]\s*|\s+(?:feat\.?|ft\.?|featuring)\s+""", RegexOption.IGNORE_CASE)
 private val adjacentPartner = Regex("""^(25/17)\s*/\s*(.+)$|^(.+?)\s*/\s*(25/17)$""")
+
+private val featuredCredit = Regex("""\b(?:feat(?:uring)?|ft)\.?\s+([^()\[\]]+)""", RegexOption.IGNORE_CASE)
+private val guestSeparator = Regex("""\s+(?:&|and|x|×)\s+""", RegexOption.IGNORE_CASE)
+
+internal fun hasFeaturedCredit(name: String, vararg labels: String?): Boolean {
+    val wanted = artistSearchKey(name)
+    return labels.filterNotNull().any { label ->
+        featuredCredit.findAll(label).any { match ->
+            displayArtists(match.groupValues[1]).any {
+                artistSearchKey(it) == wanted || guestSeparator.split(it).any { part -> artistSearchKey(part) == wanted }
+            }
+        }
+    }
+}
 
 internal const val ARTIST_25_17_MBID = "3e7108b0-91a7-4599-8313-38594939c8b5"
 
@@ -47,7 +77,16 @@ private val explicitVideoCredit = Regex(
     """([\[(])(uncensored|censored|explicit|clean)\s+official\s+(?:music\s+)?video([\])])""", RegexOption.IGNORE_CASE)
 // A bare @handle can be part of a title. Only a known venue or explicit live label identifies a show.
 private val venueCredit = Regex("""\s+(?:live\s+@\s*([^@|()\[\]]{1,80})|@\s*(16\s+тонн))$""", RegexOption.IGNORE_CASE)
-private val sessionCredit = Regex("""\s+[|–—-]\s*([\p{L}\p{N}][\p{L}\p{N} '&’.-]{0,60}\s+sessions)$""", RegexOption.IGNORE_CASE)
+private val sessionCredit = Regex(
+    """(?:\s*[|–—]\s*|\s+-\s+|\s*([(\[])\s*)((?:[\p{L}\p{N}][\p{L}\p{N} '&’.-]{0,60}\s+)?(?:session|ssesion)s?)\s*([)\]]?)$""", RegexOption.IGNORE_CASE)
+private val misspelledSession = Regex("""\bssesions?$""", RegexOption.IGNORE_CASE)
+
+internal fun sessionTitle(value: String): String = sessionCredit.replace(value) { match ->
+    val (opening, session, closing) = match.destructured
+    val expectedClose = when (opening) { "(" -> ")"; "[" -> "]"; else -> "" }
+    if (match.range.first == 0 || expectedClose != closing) match.value
+    else " (" + session.replace(misspelledSession) { if (it.value.endsWith("s", true)) "Sessions" else "Session" } + ")"
+}
 private val titleSeparator = Regex("""\s+[-–—]\s+|_[-–—]_""")
 private val snakeWord = Regex("""[\p{L}\p{N}]+(?:[-’'][\p{L}\p{N}]+)*""")
 private const val officialNotice = "(?:official (?:music video|audio|video|lyrics? video|visualizer)|mood video|официальный клип|официальное видео)"
@@ -83,13 +122,14 @@ private fun unpackWords(label: String): String {
 }
 
 private fun sourceNames(raw: String?, artist: String?, inferArtist: Boolean): TrackNames {
-    val name = raw?.let(::musicDisplayTitle)
-    var credit = artist?.let(::musicDisplayCredit)
+    val name = raw?.let(::musicDisplayTitle)?.let(::stripSourceSite)?.takeIf { it.isNotEmpty() }
+    var credit = artist?.let(::stripSourceSite)?.takeIf { it.isNotBlank() }?.let(::musicDisplayCredit)
     if (name.isNullOrEmpty()) return TrackNames(name, credit)
     val file = isAudioFilename(name)
     var stage = StageCredits.single(credit) ?: StageCredits.declared(artist)
-    if (stage == null && !file && !possibleDecoration.containsMatchIn(name)) return TrackNames(name, credit)
-    var stem = if (file) musicDisplayTitle(name.replace(audioExtension, "").replace('_', ' ')).ifEmpty { name } else name
+    if (stage == null && !file && !possibleDecoration.containsMatchIn(name)) return TrackNames(sourceEditTitle(name), credit)
+    var stem = if (file) stripSourceSite(musicDisplayTitle(name.replace(audioExtension, "").replace('_', ' '))) else name
+    if (stem.isEmpty()) return TrackNames(null, credit)
     if (!file && encodedSeparator.containsMatchIn(stem)) {
         stem = stem.split(encodedSeparator).joinToString(" - ", transform = ::unpackWords)
     }
@@ -119,7 +159,7 @@ private fun sourceNames(raw: String?, artist: String?, inferArtist: Boolean): Tr
     val cleanTitle = stage?.trimTitle(stem)
         ?: credit?.takeIf { known != null }?.let { trimRepeatedCredit(stem, it) } ?: stem
     val performance = venueCredit.replace(cleanTitle) { " (Live at " + (it.groups[1] ?: it.groups[2])!!.value + ")" }
-    return TrackNames(sessionCredit.replace(performance) { " (" + it.groupValues[1] + ")" }, credit)
+    return TrackNames(sourceEditTitle(sessionTitle(performance)), credit)
 }
 
 internal fun trackNames(
@@ -133,5 +173,6 @@ internal fun trackNames(
         title == rawTitle -> fallback.title
         else -> sourceNames(title, artist, false).title
     }
-    return TrackNames(effectiveTitle, if (hasArtist && !cleanSourceArtist) artist else fallback.artist)
+    val names = TrackNames(effectiveTitle, if (hasArtist && !cleanSourceArtist) artist else fallback.artist)
+    return if (hasTitle && !cleanSourceTitle) names else names.withFeaturedArtists(!hasArtist || cleanSourceArtist)
 }

@@ -59,6 +59,7 @@ class CatalogRuntime:
             self.work = CatalogProcessCoordinator(
                 PostgresCatalogExecutionRepository(self._sessions),
                 tree_factory=factory,
+                discogs_token=settings.discogs_token.get_secret_value(),
                 proxy=settings.metadata_proxy.get_secret_value()
                 if settings.metadata_proxy
                 else None,

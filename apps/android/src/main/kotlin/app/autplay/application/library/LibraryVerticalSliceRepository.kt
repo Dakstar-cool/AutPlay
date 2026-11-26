@@ -235,10 +235,6 @@ class LibraryVerticalSliceRepository(
                 val payload = kotlinx.serialization.json.buildJsonObject {
                     put("local_playlist_entry_id", JsonPrimitive(entryId.value))
                     put("local_playlist_id", JsonPrimitive(playlistId.value))
-                    if (binding != null) {
-                        put("playlist_import", JsonPrimitive(true))
-                        if (index == snapshot.entries.lastIndex) put("playlist_import_complete", JsonPrimitive(true))
-                    }
                     if (ref.serverUserTrackRefId == null) put("local_user_track_ref_id", JsonPrimitive(ref.localUserTrackRefId))
                     else put("user_track_ref_id", JsonPrimitive(ref.serverUserTrackRefId))
                 }.toString()
@@ -248,10 +244,6 @@ class LibraryVerticalSliceRepository(
                     database.playlistDao().insertEntry(PlaylistEntryEntity(entryId.value, null, playlistId.value,
                         ref.localUserTrackRefId, position, position, null, now, sync(bound), null, sequence, null, profile))
                 }
-            }
-            if (binding != null) refs.distinctBy { it.localUserTrackRefId }.forEachIndexed { index, ref ->
-                val changeId = change(1 + snapshot.tracks.size + snapshot.entries.size + index)
-                writePreference(binding, LocalId(ref.localUserTrackRefId), changeId, "LIKED", false, null, now)
             }
             created
         }

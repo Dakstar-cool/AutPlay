@@ -65,7 +65,7 @@ class PlaybackPlayerSurfacesTest {
     val composeRule = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
-    @Test fun seekThumbSharesTrackCenterAtDifferentPositions() {
+    @Test fun titlePillFillsToThePlaybackPosition() {
         val position = androidx.compose.runtime.mutableLongStateOf(42_000L)
         composeRule.setContent { AutPlayTheme {
             NowPlayingScreen(ordinaryState().copy(positionMs = position.longValue), {}, {}, {}, {}, {}, {}, {}, {}, true, {})
@@ -74,7 +74,7 @@ class PlaybackPlayerSurfacesTest {
         for (fraction in listOf(.25f, .5f, .75f)) {
             composeRule.runOnIdle { position.longValue = (180_000 * fraction).toLong() }
             slider.performScrollTo()
-            val frame = slider.captureToImage().asAndroidBitmap()
+            val frame = composeRule.onNodeWithTag("player-title-pill", useUnmergedTree = true).captureToImage().asAndroidBitmap()
             if (InstrumentationRegistry.getArguments().getString("capturePlayer") == "true") {
                 context.openFileOutput("verified-player.png", 0).use {
                     composeRule.onRoot().captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
@@ -83,21 +83,13 @@ class PlaybackPlayerSurfacesTest {
                     frame.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
                 }
             }
-            val railX = (frame.width * .10f).toInt()
-            val ink = frame.getPixel(railX, frame.height / 2)
-            fun span(column: Int) = (0 until frame.height).filter { frame.getPixel(column, it) == ink }
-            val rail = span(railX)
-            val spans = (0 until frame.width).map(::span)
-            val diameter = spans.maxOf { it.size }
-            val middle = spans.indices.filter { spans[it].size == diameter }.average().toInt()
-            val thumb = spans[middle]
-            org.junit.Assert.assertTrue("thumb=$thumb rail=$rail", thumb.size > rail.size * 2)
-            assertEquals((rail.first() + rail.last()) / 2f, (thumb.first() + thumb.last()) / 2f, 1f)
-            // The accessible Slider bounds include padding beyond the ends of the drawn rail.
-            val midY = (rail.first() + rail.last()) / 2
-            val background = frame.getPixel(0, midY)
-            val line = (0 until frame.width).filter { frame.getPixel(it, midY) != background }
-            assertEquals(line.first() + (line.last() - line.first()) * fraction, middle.toFloat(), 2f)
+            // Sample above the title and away from the rounded ends.
+            val y = frame.height / 4
+            val ink = frame.getPixel(frame.width / 5, y)
+            val base = frame.getPixel(frame.width * 4 / 5, y)
+            org.junit.Assert.assertNotEquals(base, ink)
+            val edge = (frame.width / 5..frame.width * 4 / 5).first { frame.getPixel(it, y) != ink }
+            assertEquals(frame.width * fraction, edge.toFloat(), 3f)
         }
     }
 

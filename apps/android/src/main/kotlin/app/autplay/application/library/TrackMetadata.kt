@@ -1,7 +1,6 @@
 package app.autplay.application.library
 
 import app.autplay.application.artist.TrackNames
-import app.autplay.application.artist.musicDisplayCredit
 import app.autplay.application.artist.trackNames
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.data.local.entity.TrackMetadataEntity
@@ -35,14 +34,10 @@ data class TrackMetadata(val revision: Long, val state: String, val fields: Json
 
 internal fun TrackMetadataEntity.decoded(): TrackMetadata = TrackMetadata.decode(Json.parseToJsonElement(payloadJson).jsonObject)
 
-private val currentTitleVersions = setOf("display-v7")
-private val currentArtistVersions = setOf("display-v3", "display-v4", "display-v5", "display-v6", "display-v7")
-
-private fun JsonObject?.isSourceLabel(field: String): Boolean =
+private fun JsonObject?.isSourceLabel(): Boolean =
     this?.get("source")?.jsonPrimitive?.contentOrNull in setOf("EMBEDDED", "SOURCE_NATIVE", "FILENAME", "SOURCE_LABEL") &&
         this?.get("locked")?.jsonPrimitive?.booleanOrNull != true &&
-        this?.get("normalization_version")?.jsonPrimitive?.contentOrNull !in
-            (if (field == "artist") currentArtistVersions else currentTitleVersions)
+        this?.get("normalization_version")?.jsonPrimitive?.contentOrNull != "display-v9"
 
 internal fun TrackMetadata?.allowsRawArtistAlias(): Boolean {
     val proof = this?.provenance?.get("artist") as? JsonObject
@@ -54,8 +49,8 @@ internal fun TrackMetadata?.names(rawTitle: String?, rawArtist: String?): TrackN
     val hasTitle = this?.fields?.containsKey("title") == true
     val hasArtist = this?.fields?.containsKey("artist") == true
     return trackNames(rawTitle, if (hasArtist) this?.text("artist") else rawArtist,
-        this?.text("title"), hasTitle, hasArtist, (this?.provenance?.get("title") as? JsonObject).isSourceLabel("title"),
-        (this?.provenance?.get("artist") as? JsonObject).isSourceLabel("artist"))
+        this?.text("title"), hasTitle, hasArtist, (this?.provenance?.get("title") as? JsonObject).isSourceLabel(),
+        (this?.provenance?.get("artist") as? JsonObject).isSourceLabel())
 }
 
 /** The caller owns the Room transaction, including the FTS refresh. */
@@ -97,13 +92,14 @@ internal suspend fun AutPlayDatabase.projectMetadata(profile: String, track: Str
     val provenance = JsonObject(serverProofs + localSources.filterKeys { it in chosenLocal })
     val selected = serverFields + chosenLocal
     val effectiveArtist = if (selected.containsKey("artist")) (selected["artist"] as? JsonPrimitive)?.contentOrNull else ref.rawArtist
-    val fields = JsonObject(selected.mapValues { (key, value) ->
-        val proof = provenance[key] as? JsonObject
-        val label = (value as? JsonPrimitive)?.contentOrNull
-        if (key !in nameKeys || label == null || !proof.isSourceLabel(key)) value
-        else if (key == "artist") JsonPrimitive(musicDisplayCredit(label))
-        else JsonPrimitive(trackNames(ref.rawTitle, effectiveArtist, label,
-            hasTitle = true, hasArtist = selected.containsKey("artist"), cleanSourceTitle = true).title)
+    val cleanTitle = (provenance["title"] as? JsonObject).isSourceLabel()
+    val cleanArtist = (provenance["artist"] as? JsonObject).isSourceLabel()
+    val names = trackNames(ref.rawTitle, effectiveArtist, (selected["title"] as? JsonPrimitive)?.contentOrNull,
+        "title" in selected, "artist" in selected, cleanTitle, cleanArtist)
+    val fields = JsonObject(selected.toMutableMap().apply {
+        if (cleanTitle && selected["title"] != JsonNull) put("title", JsonPrimitive(names.title))
+        if ((cleanArtist && selected["artist"] != JsonNull) ||
+            ("artist" !in selected && cleanTitle && names.artist != effectiveArtist)) put("artist", JsonPrimitive(names.artist))
     })
     val localArt = if (parsed.state == "LOCAL") parsed.payload["artwork_sha256"] else prior?.payload?.get("local_artwork_sha256")
         ?: if (prior?.state == "LOCAL") prior.payload["artwork_sha256"] else null

@@ -6,7 +6,10 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode, urlsplit
 
+from autplay.domain.featured_artists import featured_names, same_feature_credit
+from autplay.domain.title_edits import edit_parts, edit_title, edition_label, joined_title_matches
 from autplay.domain.track_metadata import lookup_title, performance_search_title
+from autplay.domain.track_names import strip_source_site
 
 _PUNCTUATION = str.maketrans("\u2019\u2018\u2010\u2011\u2013—", "''----")
 
@@ -21,16 +24,11 @@ def album_label(value: str | None) -> str | None:
     return None if name in {"", "<unknown>", "unknown album", "неизвестный альбом"} else name
 
 
-_FEATURE = re.compile(r"^(.*?)\s*\(\s*(?:feat(?:uring)?|ft)\.?\s+([^()]+)\)\s*$", re.I)
-_CREDIT_JOIN = re.compile(r"^(?:\s+(?:feat(?:uring)?|ft)\.?\s+|\s+&\s+|,\s+)", re.I)
-
-
 def artwork_title(title: str, artist: str) -> str:
     # Strip presentation labels from the search only; live/remix/cover credits stay in the title.
-    if not any(
-        marker in title for marker in ("(", "[", " @", " - ", " | ", " \u2013 ", " — ", "*")
-    ):
-        return title
+    title = strip_source_site(title)
+    if not any(marker in title for marker in ("(", "[", " @", " - ", "|", " \u2013 ", " — ", "*")):
+        return edit_title(title)
     cleaned = lookup_title(title, artist)
     for token in (" (music video)", " [music video]", " - music video", " *video in description*"):
         if label(cleaned).endswith(token):
@@ -60,13 +58,16 @@ def versioned_titles(title: str, version: object) -> tuple[str, ...]:
         return (title,)
     name, suffix = label(title), label(version)
     suffixes = (f" ({suffix})", f" [{suffix}]", f" - {suffix}", f" {suffix}")
-    if name.endswith(suffixes):
+    edition = edition_label(version)
+    if name.endswith(suffixes) or (edition and edition == edit_parts(title)[1]):
         return (title,)
     return (f"{title} ({version})", f"{title} - {version}", f"{title} {version}")
 
 
 def recording_labels_match(artist: str, title: str, primary: str, catalog_title: str) -> bool:
-    if not primary or not artist.startswith(primary):
+    artist = strip_source_site(artist)
+    title = strip_source_site(title)
+    if not title or not primary or not artist:
         return False
     if (artist, title) == (primary, catalog_title):
         return True
@@ -76,17 +77,14 @@ def recording_labels_match(artist: str, title: str, primary: str, catalog_title:
     )
     if (artist, title) == (primary, catalog_title):
         return True
-    # A featured credit can be in the source's artist tag and in the catalogue's title.
-    # Require the exact primary, guest credit and the rest of the versioned title.
-    feature = _FEATURE.fullmatch(catalog_title)
-    if not feature:
+    title, artist = featured_names(title, artist)
+    catalog_title, primary = featured_names(catalog_title, primary)
+    if artist != primary and not same_feature_credit(artist, primary):
         return False
-    tail = artist[len(primary) :]
-    join = _CREDIT_JOIN.match(tail)
-    return bool(
-        join
-        and tail[join.end() :] == feature[2].strip()
-        and (title == feature[1].strip() or title == catalog_title)
+    base, edition = edit_parts(title)
+    catalog_base, catalog_edition = edit_parts(catalog_title)
+    return edition == catalog_edition and (
+        base == catalog_base or joined_title_matches(base, catalog_base)
     )
 
 
@@ -109,6 +107,7 @@ def image_url(value: object, kind: str) -> str | None:
 
 
 def search_url(artist: str, title: str = "", *, clean_title: bool = True) -> str:
+    artist = strip_source_site(artist)
     limit = 25 if title else 100
     if clean_title:
         title = artwork_search_title(title, artist)
@@ -165,7 +164,7 @@ def match_artwork(
         or duration_ms < 1000
     ):
         return None
-    expected = label(artist), label(title)
+    expected = label(strip_source_site(artist)), label(strip_source_site(title))
     if expected[0] in {
         "",
         "<unknown>",
@@ -256,7 +255,23 @@ def catalogue_api_url(url: str) -> bool:
         parsed = urlsplit(url)
     except ValueError:
         return False
-    if parsed.scheme != "https" or parsed.netloc != "api.deezer.com" or parsed.fragment:
+    if parsed.scheme != "https" or parsed.fragment:
+        return False
+    if parsed.netloc == "api.discogs.com":
+        if re.fullmatch(r"/releases/[1-9][0-9]{0,15}", parsed.path):
+            return not parsed.query
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        return (
+            parsed.path == "/database/search"
+            and set(query) == {"type", "artist", "release_title", "per_page"}
+            and query["type"] == ["release"]
+            and query["per_page"] == ["25"]
+            and all(
+                len(query[k]) == 1 and 0 < len(query[k][0]) <= 500
+                for k in ("artist", "release_title")
+            )
+        )
+    if parsed.netloc != "api.deezer.com":
         return False
     if re.fullmatch(r"/(?:artist|album)/[1-9][0-9]{0,16}", parsed.path):
         return not parsed.query

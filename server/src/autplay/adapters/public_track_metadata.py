@@ -28,6 +28,7 @@ from autplay.domain.catalog_artwork import (
     native_image_host,
     search_url,
 )
+from autplay.domain.featured_artists import same_feature_credit
 from autplay.domain.music_variations import variation_kind
 from autplay.domain.musicbrainz_performances import cover_original, recording_work, remix_sources
 from autplay.domain.original_artwork import (
@@ -51,11 +52,13 @@ from autplay.domain.track_metadata import (
     MetadataFields,
     MetadataQuery,
     catalogue_title_matches,
+    lookup_names,
     lookup_title,
     metadata_search_terms,
     normalized,
     validate_fields,
 )
+from autplay.domain.track_names import strip_source_site
 from autplay.domain.web_artwork import (
     BANDCAMP_SEARCH,
     bandcamp_query,
@@ -311,6 +314,7 @@ def _credit_members(value: Any) -> tuple[dict[str, str], ...]:
         return ()
     members = []
     prior_join = ""
+    featured = False
     for item in value:
         if not isinstance(item, dict) or not isinstance(artist := item.get("artist"), dict):
             return ()
@@ -332,15 +336,17 @@ def _credit_members(value: Any) -> tuple[dict[str, str], ...]:
             or not credited.strip()
         ):
             return ()
+        separator = prior_join.strip().casefold()
+        featured = separator in {"feat.", "feat", "ft.", "ft", "featuring"} or (
+            featured and separator in {",", "&", "and", ", and", ", &"}
+        )
         members.append(
             {
                 "mbid": identity,
                 "name": name,
                 "credited_name": credited,
                 "join_phrase": join,
-                "role": "FEATURED"
-                if prior_join.strip().casefold() in {"feat.", "feat", "ft.", "ft", "featuring"}
-                else "PRIMARY",
+                "role": "FEATURED" if featured else "PRIMARY",
             }
         )
         aliases = artist.get("aliases")
@@ -402,13 +408,18 @@ def _expressions(query: MetadataQuery) -> tuple[str, ...]:
             raise ValueError("duration")
         constraints.append(f"dur:[{max(1, duration - 2000)} TO {duration + 2000}]")
     expressions = [
-        " AND ".join([f'recording:"{_lucene(title)}"', f'artist:"{_lucene(artist)}"', *constraints])
+        " AND ".join(
+            ([f'recording:"{_lucene(title)}"'] if title else [])
+            + [f'artist:"{_lucene(artist)}"', *constraints]
+        )
         for title, artist in metadata_search_terms(query.title, query.artist)
+        if title or query.duration_ms is not None
     ]
     if query.source_metadata and (isrc := query.source_metadata.external_ids.get("isrc")):
         if re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", isrc) is None:
             raise ValueError("isrc")
-        credit = [f'artist:"{_lucene(query.artist)}"'] if query.artist.strip() else []
+        artist = strip_source_site(query.artist).strip()
+        credit = [f'artist:"{_lucene(artist)}"'] if artist else []
         expressions.insert(0, " AND ".join([f"isrc:{isrc}", *credit, *constraints]))
     return tuple(expressions)
 
@@ -455,7 +466,21 @@ class MusicBrainzMetadataProvider:
             recordings = [dict(recording, score=100)] if recording.get("id") else []
         else:
             recordings = []
-            expected_title = lookup_title(query.title, query.artist)
+            expected_title, expected_artist = lookup_names(query.title, query.artist)
+
+            def matches(row: object) -> bool:
+                if not isinstance(row, dict):
+                    return False
+                title, artist = lookup_names(
+                    row.get("title") or "", _credit(row.get("artist-credit")) or ""
+                )
+                return (
+                    normalized(artist) == normalized(expected_artist)
+                    or same_feature_credit(artist, expected_artist)
+                ) and catalogue_title_matches(
+                    expected_title, [title], _optional_text(row.get("disambiguation"))
+                )
+
             for expression in _expressions(query):
                 params = urlencode({"query": expression, "limit": 5, "fmt": "json"})
                 data = self.http.json(f"https://musicbrainz.org/ws/2/recording?{params}")
@@ -465,17 +490,7 @@ class MusicBrainzMetadataProvider:
                     continue
                 if not recordings:
                     recordings = found
-                if expression.startswith("isrc:") or any(
-                    isinstance(row, dict)
-                    and normalized(_credit(row.get("artist-credit")) or "")
-                    == normalized(query.artist)
-                    and catalogue_title_matches(
-                        expected_title,
-                        [lookup_title(row.get("title") or "", query.artist)],
-                        _optional_text(row.get("disambiguation")),
-                    )
-                    for row in found
-                ):
+                if expression.startswith("isrc:") or any(matches(row) for row in found):
                     recordings = found
                     break
         results: list[MetadataCandidate] = []
@@ -726,6 +741,11 @@ class MusicBrainzMetadataProvider:
         return match
 
     def find_publisher_cover(self, query: MetadataQuery) -> ArtMatch | None:
+        if (
+            not strip_source_site(query.artist).strip()
+            or not strip_source_site(query.title).strip()
+        ):
+            return None
         page = self.http.json(BANDCAMP_SEARCH, post=bandcamp_query(query.artist, query.title))
         candidates = publisher_candidates(page, query.artist, query.title, query.album)
         matches = []
@@ -799,10 +819,11 @@ class MusicBrainzMetadataProvider:
 
     def _cover_recording_id(self, query: MetadataQuery, version: str | None) -> str | None:
         # Identify the performed cover first. Its work relation supplies the original.
-        if not query.duration_ms:
+        artist = strip_source_site(query.artist)
+        if not query.duration_ms or not artist:
             return None
         base, _ = variation_title(query, "COVER", version)
-        expression = f'artist:"{_lucene(query.artist)}" AND recording:"{_lucene(base)}"'
+        expression = f'artist:"{_lucene(artist)}" AND recording:"{_lucene(base)}"'
         url = "https://musicbrainz.org/ws/2/recording/?" + urlencode(
             {"query": expression, "limit": 25, "fmt": "json"}
         )
@@ -820,7 +841,7 @@ class MusicBrainzMetadataProvider:
                 and recording
                 and abs(length - query.duration_ms) <= 2000
                 and normalized(row["title"]) == normalized(base)
-                and normalized(_credit(row.get("artist-credit"))) == normalized(query.artist)
+                and normalized(_credit(row.get("artist-credit"))) == normalized(artist)
             ):
                 ids.add(recording)
         return ids.pop() if len(ids) == 1 else None
@@ -895,16 +916,17 @@ class MusicBrainzMetadataProvider:
         return None
 
     def find_archive_cover(self, query: MetadataQuery) -> ArtMatch | None:
-        if not query.artist or not query.title or not query.duration_ms or query.release_mbid:
+        title, artist = strip_source_site(query.title), strip_source_site(query.artist)
+        if not artist or not title or not query.duration_ms or query.release_mbid:
             return None
         choices = []
-        ids = archive_items(self.http.json(archive_search(query.artist)))
+        ids = archive_items(self.http.json(archive_search(artist)))
         for identifier in ids[:6]:
             item = self.http.json("https://archive.org/metadata/" + identifier)
             if match := archive_cover(
-                item, identifier, query.title, query.artist, query.album, query.duration_ms
+                item, identifier, title, artist, query.album, query.duration_ms
             ):
-                choices.append(match)
+                choices.append(replace(match, title=query.title, credit=query.artist))
         return choices[0] if len({m.cover for m in choices}) == 1 else None
 
     def public_image(self, url: str) -> bytes | None:

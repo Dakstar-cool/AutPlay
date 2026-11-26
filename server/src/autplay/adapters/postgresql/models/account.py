@@ -15,7 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import BYTEA, TIMESTAMP
+from sqlalchemy.dialects.postgresql import ARRAY, BYTEA, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,6 +32,7 @@ class UserAccountRow(Base):
         nullable=False,
         server_default=text("uuidv7()"),
     )
+    onboarding_artists: Mapped[list[UUID] | None] = mapped_column(ARRAY(PG_UUID(as_uuid=True)))
     display_name: Mapped[str] = mapped_column(
         Text(),
         nullable=False,

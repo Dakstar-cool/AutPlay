@@ -148,4 +148,17 @@ def create_music_discovery_router(
             principal(request), release_id, limit=limit, offset=offset
         )
 
+    @router.get("/album-tracklist")
+    def album_tracklist(
+        request: Request,
+        mbid: UUID | None = None,
+        discogs_id: Annotated[int | None, Query(ge=1, le=9_999_999_999_999_999)] = None,
+        title: Annotated[str, Query(max_length=500)] = "",
+        artist: Annotated[str, Query(max_length=500)] = "",
+        year: Annotated[int | None, Query(ge=1, le=9999)] = None,
+    ) -> dict[str, object]:
+        return available().album_tracklist(
+            principal(request), mbid, discogs_id, title.strip(), artist.strip(), year
+        )
+
     return router

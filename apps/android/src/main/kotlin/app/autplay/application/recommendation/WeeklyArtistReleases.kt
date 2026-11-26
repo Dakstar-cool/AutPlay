@@ -14,9 +14,13 @@ internal fun recommendedReleaseArtists(items: List<HomeRecommendationItem>,
         signal.likedTrack?.let { liked.getOrPut(artist) { mutableSetOf() }.add(it) }
         if (signal.day >= 0) days.getOrPut(artist) { mutableSetOf() }.add(signal.day)
     }
-    return items.sortedBy { it.displayPosition }.asSequence().flatMap { displayArtists(it.artist) }
-        .map(::artistSearchKey).distinct()
-        .filter { liked[it].orEmpty().size >= 3 || days[it].orEmpty().size >= 3 }.take(10).toSet()
+    val qualified = (liked.keys + days.keys).filter { liked[it].orEmpty().size >= 3 || days[it].orEmpty().size >= 3 }.toSet()
+    val recommended = items.sortedBy { it.displayPosition }.flatMap { displayArtists(it.artist) }
+        .map(::artistSearchKey).filter { it in qualified }.distinct()
+    return recommended.ifEmpty {
+        qualified.sortedWith(compareByDescending<String> { liked[it].orEmpty().size }
+            .thenByDescending { days[it].orEmpty().size }.thenBy { it })
+    }.take(10).toSet()
 }
 
 internal fun isWeeklyArtistRelease(credit: String?, date: String?, artists: Set<String>, today: LocalDate): Boolean {

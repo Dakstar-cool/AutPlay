@@ -19,10 +19,12 @@ data class HeardCatalogueTrack(val mbid: String?, val trackId: String, val recor
     val title: String?, val artist: String?, val lastPlayedMs: Long)
 
 data class LibraryReleaseRow(@Embedded val release: ReleaseProjectionEntity, val artworkTrackId: String?)
+data class EditionCoverTrack(val releaseId: String, val trackRef: String?)
 data class LibraryPlaylistRow(@Embedded val playlist: PlaylistEntity, val artworkTrackId: String?)
 
 data class TaggedAlbumTrack(val trackId: String, val recording: String?, val album: String, val albumArtist: String,
-    val artist: String?, val title: String?, val date: String?, val duration: Long?, val disc: Int?, val position: Int?)
+    val artist: String?, val title: String?, val date: String?, val duration: Long?, val disc: Int?, val position: Int?,
+    val hasArtwork: Boolean = false)
 
 data class LibraryArtistTrack(val trackId: String, val recordingId: String?, val title: String?, val artist: String?,
     val nameInput: String? = title, val hasTitle: Boolean = false, val hasArtist: Boolean = false,
@@ -77,10 +79,10 @@ interface CatalogProjectionDao {
                COALESCE(NULLIF(trim(u.raw_title), ''), r.title) AS nameInput, json_type(m.payload_json,'$.fields.title') IS NOT NULL AS hasTitle,
                json_type(m.payload_json,'$.fields.artist') IS NOT NULL AS hasArtist,
                CASE WHEN json_extract(m.payload_json,'$.provenance.title.source') IN ('EMBEDDED','SOURCE_NATIVE','FILENAME','SOURCE_LABEL')
-                     AND coalesce(json_extract(m.payload_json,'$.provenance.title.normalization_version'),'') <> 'display-v7'
+                     AND coalesce(json_extract(m.payload_json,'$.provenance.title.normalization_version'),'') <> 'display-v9'
                      AND coalesce(json_extract(m.payload_json,'$.provenance.title.locked'),0)=0 THEN 1 ELSE 0 END AS cleanSourceTitle,
                CASE WHEN json_extract(m.payload_json,'$.provenance.artist.source') IN ('EMBEDDED','SOURCE_NATIVE','FILENAME','SOURCE_LABEL')
-                     AND coalesce(json_extract(m.payload_json,'$.provenance.artist.normalization_version'),'') NOT IN ('display-v3','display-v4','display-v5','display-v6','display-v7')
+                     AND coalesce(json_extract(m.payload_json,'$.provenance.artist.normalization_version'),'') <> 'display-v9'
                      AND coalesce(json_extract(m.payload_json,'$.provenance.artist.locked'),0)=0 THEN 1 ELSE 0 END AS cleanSourceArtist,
                CASE WHEN json_type(m.payload_json, '$.fields.title') IS NULL THEN COALESCE(NULLIF(trim(u.raw_title), ''), r.title)
                     ELSE json_extract(m.payload_json, '$.fields.title') END AS title,
@@ -151,7 +153,8 @@ interface CatalogProjectionDao {
         coalesce(json_extract(m.payload_json,'$.fields.title'),u.raw_title) AS title,
         json_extract(m.payload_json,'$.fields.release_date') AS date, u.raw_duration_ms AS duration,
         CAST(json_extract(m.payload_json,'$.fields.disc_number') AS INTEGER) AS disc,
-        CAST(json_extract(m.payload_json,'$.fields.track_number') AS INTEGER) AS position
+        CAST(json_extract(m.payload_json,'$.fields.track_number') AS INTEGER) AS position,
+        m.artwork_sha256 IS NOT NULL AS hasArtwork
         FROM user_track_ref u LEFT JOIN track_metadata_projection m ON m.server_profile_id=u.server_profile_id
             AND m.local_user_track_ref_id=u.local_user_track_ref_id
         WHERE u.server_profile_id=:profileId AND u.deleted_at_ms IS NULL
@@ -165,6 +168,16 @@ interface CatalogProjectionDao {
                 WHERE rt.local_recording_id=u.local_recording_id AND r.is_deleted=0)
         ORDER BY disc IS NULL,disc,position IS NULL,position,title,trackId""")
     fun taggedAlbumTracks(profileId: String, ids: List<String>, allTracks: Boolean, personal: Boolean): Flow<List<TaggedAlbumTrack>>
+
+    @Query("""SELECT ids.releaseId, (
+        SELECT u.local_user_track_ref_id FROM catalog_edition_track e JOIN user_track_ref u
+            ON u.server_profile_id=e.profile AND u.server_recording_id=e.recordingId
+        LEFT JOIN track_metadata_projection m USING(server_profile_id,local_user_track_ref_id)
+        WHERE e.profile=:profile AND e.releaseId=ids.releaseId AND e.deleted=0 AND u.deleted_at_ms IS NULL
+        ORDER BY m.artwork_sha256 IS NULL,e.disc,e.position,e.trackId,u.server_user_track_ref_id IS NULL,u.server_user_track_ref_id,
+            u.created_at_ms,u.local_user_track_ref_id LIMIT 1) AS trackRef
+        FROM (SELECT DISTINCT releaseId FROM catalog_edition_track WHERE profile=:profile AND releaseId IN (:ids)) ids""")
+    suspend fun coverTracksForEditions(profile: String, ids: List<String>): List<EditionCoverTrack>
 
     @Upsert suspend fun putEditionTrack(track: CatalogEditionTrack)
     @Query("SELECT * FROM catalog_edition_track WHERE profile=:profile AND trackId=:id")
@@ -191,16 +204,19 @@ interface CatalogProjectionDao {
     @Query("SELECT DISTINCT rel.* FROM release_projection rel JOIN release_track_projection rt ON rt.local_release_id = rel.local_release_id JOIN user_track_ref u ON u.local_recording_id = rt.local_recording_id WHERE rel.server_release_id IN (:serverIds) AND rel.is_deleted = 0 AND u.deleted_at_ms IS NULL AND u.server_profile_id = :profileId ORDER BY rel.projection_updated_at_ms DESC, rel.local_release_id ASC LIMIT :limit") suspend fun releasesByServerIdsForProfile(profileId: String, serverIds: List<String>, limit: Int): List<ReleaseProjectionEntity>
     @Query("SELECT DISTINCT rel.* FROM release_projection rel JOIN release_track_projection rt ON rt.local_release_id = rel.local_release_id JOIN user_track_ref u ON u.local_recording_id = rt.local_recording_id WHERE rel.local_release_id = :localId AND rel.is_deleted = 0 AND u.deleted_at_ms IS NULL AND u.server_profile_id = :profileId LIMIT 1") suspend fun releaseForProfile(localId: String, profileId: String): ReleaseProjectionEntity?
     @Query(LIBRARY_MEMBERSHIP + """
-        SELECT rel.*, MIN(CASE WHEN m.artwork_sha256 IS NOT NULL THEN u.local_user_track_ref_id END) AS artworkTrackId
+        SELECT rel.*, (SELECT ref.local_user_track_ref_id FROM release_track_projection pos
+            JOIN user_track_ref ref ON ref.local_recording_id=pos.local_recording_id
+            LEFT JOIN track_metadata_projection m ON m.server_profile_id=ref.server_profile_id AND m.local_user_track_ref_id=ref.local_user_track_ref_id
+            WHERE pos.local_release_id=rel.local_release_id AND ref.server_profile_id=:profileId AND ref.deleted_at_ms IS NULL
+            ORDER BY m.artwork_sha256 IS NULL,pos.medium_position,pos.sequence_no,pos.local_release_track_id,ref.server_user_track_ref_id IS NULL,
+                ref.server_user_track_ref_id,ref.created_at_ms,ref.local_user_track_ref_id LIMIT 1) AS artworkTrackId
         FROM release_projection rel
         JOIN release_track_projection rt ON rt.local_release_id = rel.local_release_id
         JOIN user_track_ref u ON u.local_recording_id = rt.local_recording_id
-        LEFT JOIN track_metadata_projection m ON m.server_profile_id = u.server_profile_id
-            AND m.local_user_track_ref_id = u.local_user_track_ref_id
         JOIN members ON members.local_user_track_ref_id = u.local_user_track_ref_id
         WHERE rel.is_deleted = 0 AND u.deleted_at_ms IS NULL AND u.server_profile_id = :profileId
         GROUP BY rel.local_release_id
-        ORDER BY rel.projection_updated_at_ms DESC, rel.local_release_id ASC LIMIT :limit
+        ORDER BY rel.release_date_text DESC, rel.title COLLATE NOCASE, rel.local_release_id ASC LIMIT :limit
     """)
     fun releasesForProfile(profileId: String, limit: Int): Flow<List<LibraryReleaseRow>>
     @Query("SELECT * FROM release_track_projection WHERE local_release_id = :localReleaseId ORDER BY medium_position ASC, sequence_no ASC, local_release_track_id ASC LIMIT :limit") suspend fun releaseTracks(localReleaseId: String, limit: Int): List<ReleaseTrackProjectionEntity>
@@ -290,10 +306,10 @@ interface LibraryDao {
                json_type(m.payload_json,'$.fields.title') IS NOT NULL AS hasTitle,
                json_type(m.payload_json,'$.fields.artist') IS NOT NULL AS hasArtist,
                CASE WHEN json_extract(m.payload_json,'$.provenance.title.source') IN ('EMBEDDED','SOURCE_NATIVE','FILENAME','SOURCE_LABEL')
-                     AND coalesce(json_extract(m.payload_json,'$.provenance.title.normalization_version'),'') <> 'display-v7'
+                     AND coalesce(json_extract(m.payload_json,'$.provenance.title.normalization_version'),'') <> 'display-v9'
                      AND coalesce(json_extract(m.payload_json,'$.provenance.title.locked'),0)=0 THEN 1 ELSE 0 END AS cleanSourceTitle,
                CASE WHEN json_extract(m.payload_json,'$.provenance.artist.source') IN ('EMBEDDED','SOURCE_NATIVE','FILENAME','SOURCE_LABEL')
-                     AND coalesce(json_extract(m.payload_json,'$.provenance.artist.normalization_version'),'') NOT IN ('display-v3','display-v4','display-v5','display-v6','display-v7')
+                     AND coalesce(json_extract(m.payload_json,'$.provenance.artist.normalization_version'),'') <> 'display-v9'
                      AND coalesce(json_extract(m.payload_json,'$.provenance.artist.locked'),0)=0 THEN 1 ELSE 0 END AS cleanSourceArtist,
                CASE WHEN json_type(m.payload_json, '$.fields.title') IS NULL THEN u.raw_title
                     ELSE json_extract(m.payload_json, '$.fields.title') END AS title,
@@ -660,8 +676,10 @@ interface LocalAudioDao {
     @Query("SELECT * FROM local_audio_state WHERE local_user_track_ref_id = :trackRefId ORDER BY CASE status WHEN 'AVAILABLE' THEN 0 ELSE 1 END, updated_at_ms DESC LIMIT :limit") suspend fun statesForPlayback(trackRefId: String, limit: Int): List<LocalAudioStateEntity>
     @Query("SELECT a.* FROM local_audio_state a JOIN user_track_ref u ON u.local_user_track_ref_id = a.local_user_track_ref_id WHERE u.server_profile_id = :profileId ORDER BY a.updated_at_ms DESC, a.local_audio_state_id ASC LIMIT :limit") fun statesForProfile(profileId: String, limit: Int): Flow<List<LocalAudioStateEntity>>
     @Query("SELECT * FROM download_intent WHERE download_intent_id = :intentId") suspend fun downloadIntent(intentId: String): DownloadIntentEntity?
-    @Query("SELECT state FROM download_intent WHERE server_profile_id = :profileId AND download_intent_id IN (:ids) ORDER BY created_at_ms DESC, updated_at_ms DESC LIMIT 1")
-    fun observeDownloadState(profileId: String, ids: List<String>): Flow<String?>
+    @Query("SELECT * FROM download_intent WHERE server_profile_id = :profileId AND download_intent_id IN (:ids) ORDER BY created_at_ms DESC, updated_at_ms DESC LIMIT 1")
+    fun observeLatestDownloadIntent(profileId: String, ids: List<String>): Flow<DownloadIntentEntity?>
+    @Query("SELECT * FROM download_intent WHERE server_profile_id = :profile AND local_user_track_ref_id IN (:refs) AND desired_storage_class IN ('USER_DOWNLOAD','PINNED') ORDER BY created_at_ms DESC, updated_at_ms DESC")
+    fun collectionDownloads(profile: String, refs: List<String>): Flow<List<DownloadIntentEntity>>
     @Query("SELECT * FROM download_intent WHERE media3_download_id = :downloadId LIMIT 1") suspend fun downloadIntentByMedia3Id(downloadId: String): DownloadIntentEntity?
     @Query("SELECT * FROM download_intent ORDER BY created_at_ms ASC LIMIT :limit") suspend fun downloadIntents(limit: Int): List<DownloadIntentEntity>
     @Query("SELECT * FROM download_intent ORDER BY created_at_ms DESC LIMIT :limit") fun observeDownloadIntents(limit: Int): Flow<List<DownloadIntentEntity>>
@@ -1066,6 +1084,7 @@ data class LocalRecommendationCandidateRow(
 )
 
 data class RecentRelevantReleaseRow(
+    val profileId: String,
     val localReleaseId: String,
     val title: String,
     val artist: String,
@@ -1261,6 +1280,7 @@ interface RecommendationPackDao {
     @Query(
         """
         SELECT DISTINCT
+            sc.server_profile_id AS profileId,
             rel.local_release_id AS localReleaseId,
             rel.title AS title,
             rel.display_artist AS artist,
@@ -1329,9 +1349,10 @@ interface SearchDao {
               SELECT 1 FROM download_intent d WHERE d.local_user_track_ref_id = u.local_user_track_ref_id
                 AND COALESCE(d.server_profile_id, 'legacy-unscoped') = u.server_profile_id
                 AND d.state = 'COMPLETED' AND d.media3_download_id IS NOT NULL
+                AND (:permanentOnly = 0 OR d.desired_storage_class IN ('PINNED','USER_DOWNLOAD'))
           ))
     """)
-    fun offlineTrackIds(profileId: String, trackIds: List<String>): Flow<List<String>>
+    fun offlineTrackIds(profileId: String, trackIds: List<String>, permanentOnly: Boolean = false): Flow<List<String>>
 
     @Query("""
         SELECT DISTINCT json_extract(m.payload_json, '$.fields.mb_recording_id')
@@ -1376,12 +1397,12 @@ interface SearchDao {
     @Query("""
         SELECT local_user_track_ref_id FROM user_track_ref
         WHERE server_profile_id=:profile AND deleted_at_ms IS NULL AND local_user_track_ref_id>:after
-          AND (raw_artist IS NOT NULL OR instr(raw_title, '.')>0 OR instr(raw_title, '_')>0 OR instr(raw_title, '|')>0
+            AND (raw_artist IS NOT NULL OR instr(raw_title, '.')>0 OR instr(raw_title, '_')>0 OR instr(raw_title, '|')>0 OR instr(raw_title, ' ')>0
             OR instr(raw_title, ' - ')>0 OR instr(raw_title, ' – ')>0 OR instr(raw_title, ' — ')>0
             OR instr(raw_title, '(')>0 OR instr(raw_title, '[')>0
             OR EXISTS (SELECT 1 FROM track_metadata_projection m
               WHERE m.server_profile_id=:profile AND m.local_user_track_ref_id=user_track_ref.local_user_track_ref_id
-                AND json_extract(m.payload_json,'$.provenance.title.source') IN ('EMBEDDED','SOURCE_NATIVE','SOURCE_LABEL')))
+                  AND json_type(m.payload_json,'$.fields.title')='text'))
         ORDER BY local_user_track_ref_id LIMIT :limit
     """)
     suspend fun filenameIndexBatch(profile: String, after: String, limit: Int): List<String>

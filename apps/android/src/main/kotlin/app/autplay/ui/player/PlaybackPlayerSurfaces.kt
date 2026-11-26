@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -110,6 +109,11 @@ import app.autplay.ui.AutPlayStateSurface
 import app.autplay.ui.AutPlayTokens
 import app.autplay.ui.TrackChangeAnimation
 import app.autplay.ui.TrackDisplayInfo
+import app.autplay.ui.TrackProgressTitle
+import app.autplay.ui.downloads.DownloadProgressRing
+import app.autplay.ui.downloads.liveTransferProgress
+import app.autplay.ui.downloads.progressPercent
+import app.autplay.ui.downloads.transferredSize
 
 public enum class PlaybackPreferenceUiState {
     Neutral,
@@ -255,6 +259,7 @@ public fun NowPlayingScreen(
     requestPhoneAudio: (() -> Unit)? = null,
     serverConnection: PlayerServerConnection = PlayerServerConnection.Offline,
     onChooseArtists: (() -> Unit)? = null,
+    transferId: String? = null,
 ) {
     DisposableEffect(Unit) {
         onObservingChanged(true)
@@ -426,10 +431,8 @@ public fun NowPlayingScreen(
                     },
                 ) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(state.title ?: stringResource(R.string.player_nothing_playing),
-                            style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        PlayerArtistLink(state.artist, artists, openArtists)
                         PlaybackTimeline(state, onSeekBegin, onSeekUpdate, onSeekCommit)
+                        PlayerArtistLink(state.artist, artists, openArtists)
                         DirectControlMessage(state)
                         if (requestPhoneAudio != null && (state.controls as? PlaybackControlGate.Locked)?.reason ==
                             PlaybackControlLockReason.SOURCE_UNAVAILABLE) {
@@ -439,7 +442,7 @@ public fun NowPlayingScreen(
                 }
                 PlayerTransportControls(state, swipeTargets, onPrevious, onNext, onTogglePlayPause,
                     preference, feedbackEnabled, onLike, onDislike, onClearPreference)
-                PlayerSecondaryControls(state, serverConnection, downloadState, onDownload, onToggleShuffle, onCycleRepeat,
+                PlayerSecondaryControls(state, serverConnection, downloadState, transferId, onDownload, onToggleShuffle, onCycleRepeat,
                     sleepTimerRemainingMinutes, stopAfterCurrentTrackActive, onTimer = { sheet = PlayerSheet.Timer })
             }
         }
@@ -581,6 +584,7 @@ private fun PlayerSecondaryControls(
     state: PlaybackPresentationState,
     serverConnection: PlayerServerConnection,
     downloadState: String?,
+    transferId: String?,
     onDownload: () -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
@@ -603,15 +607,22 @@ private fun PlayerSecondaryControls(
         if (serverConnection != PlayerServerConnection.Offline) {
             val saved = downloadState == "COMPLETED" || state.source == PlaybackSourcePresentation.Download
             val pending = downloadState in setOf("REQUESTED", "QUEUED", "DOWNLOADING", "PAUSED")
+            val transfer = if (pending && !saved) liveTransferProgress(transferId) else null
             val description = stringResource(when {
                 saved -> R.string.music_saved_offline
+                downloadState == "PAUSED" -> R.string.download_state_paused
+                downloadState == "QUEUED" || downloadState == "REQUESTED" -> R.string.download_state_queued
                 pending -> R.string.music_downloading
                 else -> R.string.music_download_track
             })
-            PlayerModeButton(if (saved) AutPlayIcon.Check else AutPlayIcon.Download, description, description,
+            val progressLabel = transfer?.let { it.fraction?.let { fraction -> progressPercent(fraction) } ?: transferredSize(it) }
+            PlayerModeButton(if (saved) AutPlayIcon.Downloaded else AutPlayIcon.Download, description,
+                listOfNotNull(description, progressLabel).joinToString(" · "),
                 active = saved || pending, enabled = serverConnection == PlayerServerConnection.Connected &&
                     !saved && !pending && state.source == PlaybackSourcePresentation.Vault,
-                onClick = onDownload, tag = "player-download-track")
+                onClick = onDownload, tag = "player-download-track", iconContent = if (pending && !saved) ({
+                    DownloadProgressRing(transfer?.fraction, Modifier.size(42.dp), running = downloadState == "DOWNLOADING")
+                }) else null)
         } else {
             PlayerModeButton(AutPlayIcon.Shuffle, stringResource(R.string.player_shuffle),
                 stringResource(if (state.shuffleModeEnabled) R.string.player_surface_shuffle_on else R.string.player_surface_shuffle_off),
@@ -638,10 +649,11 @@ private fun PlayerModeButton(
     onClick: () -> Unit,
     tag: String,
     one: Boolean = false,
+    iconContent: (@Composable () -> Unit)? = null,
 ) {
     val tint = when {
-        !enabled -> AutPlayTokens.colors.mutedText.copy(alpha = 0.38f)
         active -> MaterialTheme.colorScheme.onPrimaryContainer
+        !enabled -> AutPlayTokens.colors.mutedText.copy(alpha = 0.38f)
         else -> AutPlayTokens.colors.mutedText
     }
     Surface(
@@ -659,7 +671,7 @@ private fun PlayerModeButton(
             },
         ) {
             Box(contentAlignment = Alignment.Center) {
-                AutPlayPlatformIcon(icon, null, Modifier.size(24.dp), tint = tint)
+                if (iconContent != null) iconContent() else AutPlayPlatformIcon(icon, null, Modifier.size(24.dp), tint = tint)
                 if (one) Text("1", Modifier.background(MaterialTheme.colorScheme.primaryContainer),
                     style = MaterialTheme.typography.labelSmall, color = tint)
             }
@@ -866,9 +878,10 @@ internal fun PlaybackTimeline(
     onSeekUpdate: (Long) -> Unit,
     onSeekCommit: () -> Unit,
 ) {
+    val title = state.title ?: stringResource(R.string.player_nothing_playing)
     val duration = state.durationMs
     if (duration == null || duration <= 0 || state.isLive) {
-        PlaybackProgressTrack(state, Modifier.fillMaxWidth().height(6.dp))
+        TrackProgressTitle(title, 0f, Modifier.fillMaxWidth())
         Text(
             stringResource(if (state.isLive) R.string.player_timeline_live else R.string.player_timeline_unknown),
             color = AutPlayTokens.colors.mutedText,
@@ -901,12 +914,8 @@ internal fun PlaybackTimeline(
             },
             valueRange = 0f..duration.toFloat(),
             enabled = state.canSeek,
-            // Slider uses this width to map gestures to the usable track length.
-            thumb = { Spacer(Modifier.size(12.dp)) },
-            track = { slider ->
-                PlaybackProgressTrack(state, Modifier.fillMaxWidth().height(12.dp),
-                    thumbFraction = slider.value / duration.toFloat())
-            },
+            thumb = {},
+            track = { slider -> TrackProgressTitle(title, slider.value / duration, Modifier.fillMaxWidth().testTag("player-title-pill")) },
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
                 contentDescription = accessibilityLabel
                 stateDescription = accessibilityState
@@ -927,31 +936,24 @@ internal fun PlaybackTimeline(
 private fun PlaybackProgressTrack(
     state: PlaybackPresentationState,
     modifier: Modifier,
-    colors: ColorScheme = MaterialTheme.colorScheme,
-    thumbFraction: Float? = null,
+    colors: ColorScheme,
 ) {
-    val thumbColor = if (state.canSeek) colors.primary else AutPlayTokens.colors.mutedText
     val duration = state.durationMs?.takeIf { it > 0 } ?: 1L
     val played = (state.seekPreviewPositionMs ?: state.positionMs).coerceIn(0, duration).toFloat() / duration
     val buffered = state.bufferedPositionMs.coerceIn(0, duration).toFloat() / duration
     Canvas(modifier) {
-        val height = if (thumbFraction == null) size.height else 4.dp.toPx()
-        val top = (size.height - height) / 2f
+        val height = size.height
         val radius = CornerRadius(height / 2f)
         val rtl = layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl
         fun segment(color: Color, fraction: Float) {
             val width = size.width * fraction
-            drawRoundRect(color, Offset(if (rtl) size.width - width else 0f, top),
+            drawRoundRect(color, Offset(if (rtl) size.width - width else 0f, 0f),
                 androidx.compose.ui.geometry.Size(width, height), radius)
         }
         segment(colors.surfaceVariant, 1f)
         drawLine(colors.outline, Offset(0f, center.y), Offset(size.width, center.y), strokeWidth = 1.dp.toPx())
         segment(colors.outlineVariant, buffered)
-        val fraction = thumbFraction ?: played
-        segment(colors.primary, fraction)
-        if (thumbFraction != null) {
-            drawCircle(thumbColor, 6.dp.toPx(), Offset(size.width * (if (rtl) 1f - fraction else fraction), center.y))
-        }
+        segment(colors.primary, played)
     }
 }
 

@@ -32,6 +32,7 @@ from autplay.domain.track_metadata import metadata_search_terms
 from autplay.domain.catalog_artwork import ArtMatch, catalogue_api_url, image_url, label, match_artwork, native_image_host, search_url
 from autplay.domain.web_artwork import (BANDCAMP_SEARCH, archived_editions, bandcamp_query, discography_url, indexed_publisher_cover, publisher_candidates,
                                         publisher_match, release_lookup_url, yandex_match, yandex_search_url)
+from autplay.domain.featured_artists import featured_names
 from autplay.domain.track_names import track_names
 from autplay.domain.original_artwork import ORIGINAL_BASES, original_artwork_source
 
@@ -55,8 +56,11 @@ AND NOT EXISTS (SELECT FROM identity.recording_redirect rr WHERE rr.source_recor
 
 def names(raw_title, raw_artist, raw_album, fields):
     fields = fields or {}
-    title, artist = track_names(raw_title, fields.get("artist", raw_artist))
-    return fields.get("title", title), fields.get("artist", artist), fields.get("album", raw_album)
+    title, artist = track_names(raw_title, fields.get("artist", raw_artist), move_featured=False)
+    title, artist = fields.get("title", title), fields.get("artist", artist)
+    if title and artist:
+        title, artist = featured_names(title, artist)
+    return title, artist, fields.get("album", raw_album)
 
 
 def cache_bytes(path, data):

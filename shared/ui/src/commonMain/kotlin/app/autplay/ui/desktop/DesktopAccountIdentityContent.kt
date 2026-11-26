@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -69,25 +70,25 @@ internal fun DesktopPortableAccountContent(owner: DesktopAccountUiOwner, languag
 
 @Composable
 private fun PortableLoginForm(owner: DesktopAccountUiOwner, language: DesktopLanguage): Unit {
-    var publicId by remember { mutableStateOf("") }
+    val savedId = owner.state.connection.accountPublicId
+    var publicId by remember(savedId) { mutableStateOf(savedId.orEmpty()) }
     var password by remember { mutableStateOf("") }
     DisposableEffect(Unit) { onDispose { publicId = ""; password = "" } }
     val available = owner.available(DesktopAccountAction.LoginPortable)
-    AccountCard(DesktopAccountText.Login, language) {
-        Text(DesktopAccountText.LoginHelp.text(language))
-        AccountStatus(owner.state.connection.condition, owner.state.connection.issue, language)
+    if (savedId == null) {
         OutlinedTextField(publicId, { if (it.length <= 120) publicId = it }, enabled = available,
             label = { Text(DesktopAccountText.PublicId.text(language)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(password, { if (it.length <= 16_384) password = it }, enabled = available,
-            label = { Text(DesktopAccountText.Password.text(language)) }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        AccountButton(owner, DesktopAccountAction.LoginPortable, language,
-            enabled = publicId.isNotBlank() && password.isNotEmpty(), command = {
-                val command = DesktopAccountCommand.LoginPortable(publicId, DesktopAccountSecret(password))
-                password = ""
-                command
-            })
-    }
+    } else AccountDecisionValue(DesktopAccountText.PublicId, savedId, language)
+    OutlinedTextField(password, { if (it.length <= 16_384) password = it }, enabled = available,
+        label = { Text(DesktopAccountText.Password.text(language)) }, singleLine = true,
+        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+    AccountButton(owner, DesktopAccountAction.LoginPortable, language, enabled = publicId.isNotBlank() && password.isNotEmpty(),
+        label = if (language == DesktopLanguage.Russian) "Войти и синхронизировать" else "Sign in and sync",
+        command = {
+            val command = DesktopAccountCommand.LoginPortable(publicId, DesktopAccountSecret(password))
+            password = ""
+            command
+        })
 }
 
 @Composable
@@ -117,21 +118,42 @@ private fun PortableCreateForm(owner: DesktopAccountUiOwner, language: DesktopLa
 @Composable
 internal fun DesktopAccountConnectionContent(owner: DesktopAccountUiOwner, language: DesktopLanguage): Unit {
     val state = owner.state.connection
-    AccountCard(DesktopAccountText.Connection, language) {
-        Text(DesktopAccountText.ConnectionHelp.text(language))
-        AccountStatus(state.condition, state.issue, language)
-        state.serverLabel?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
-        state.accountPublicId?.let { AccountDecisionValue(DesktopAccountText.PublicId, it, language) }
-        state.pendingItems?.let { count -> Text("${DesktopAccountText.PendingChanges.text(language)}: $count") }
-        if (owner.permit(DesktopAccountAction.Discover, null) != null) AccountOriginForm(owner, language)
-        DesktopAccountPinnedTransportContent(owner, language)
-        Text(DesktopAccountText.QrHelp.text(language))
-        AccountSecretForm(owner, DesktopAccountAction.SubmitQr, language, DesktopAccountText.QrInput)
-        AccountButton(owner, DesktopAccountAction.ChooseQrFile, language)
-        AccountButton(owner, DesktopAccountAction.CancelConnection, language)
+    val ru = language == DesktopLanguage.Russian
+    val step = state.step
+    val working = owner.state.operations.any { it.condition == DesktopAccountCondition.Loading }
+    if (working || state.issue != DesktopAccountIssue.None) {
+        AccountStatus(if (working) DesktopAccountCondition.Loading else DesktopAccountCondition.Attention, state.issue, language)
     }
+    var changeServer by remember { mutableStateOf(false) }
+    if (step == DesktopConnectionStep.Connected) {
+        AccountCard(DesktopAccountText.Connected, language) {
+            state.accountPublicId?.let { AccountDecisionValue(DesktopAccountText.PublicId, it, language) }
+            if (state.issue != DesktopAccountIssue.None && owner.state.operations.any { it.action == DesktopAccountAction.LoginPortable })
+                Text(if (ru) "Синхронизацию можно повторить." else "You can retry synchronization.")
+            state.bindingId?.let { AccountButton(owner, DesktopAccountAction.Bind, language, it) }
+        }
+    }
+    if (step == DesktopConnectionStep.SignIn && !changeServer) {
+        AccountCard(DesktopAccountText.SignInStep, language) {
+            if (state.passwordLoginUnavailable) Text(if (ru)
+                "На этом сервере недоступен вход по ID и паролю для Mac. Обратитесь к администратору сервера."
+                else "ID and password login for Mac is unavailable on this server. Contact the server administrator.")
+            else if ((state.pendingItems ?: 0) > 0)
+                Text(if (ru) "Продолжите незавершённое подключение ниже." else "Resume the pending connection below.")
+            else PortableLoginForm(owner, language)
+        }
+    }
+    if (step == DesktopConnectionStep.SignIn || step == DesktopConnectionStep.Connected) {
+        TextButton(onClick = { changeServer = !changeServer }) { Text(if (ru) "Другой сервер" else "Change server") }
+    }
+    if (step == DesktopConnectionStep.Address || changeServer) {
+        DesktopServerAddressStep(language, owner.available(DesktopAccountAction.Discover)) { origin ->
+            owner.send(DesktopAccountCommand.Discover(DesktopAccountSecret(origin)))
+        }
+    }
+    if (state.transportBootstrap != null) DesktopAccountPinnedTransportContent(owner, language)
     state.transportReview?.let { review -> key(review.id) {
-        AccountCard(DesktopAccountText.TrustTitle, language) {
+        AccountCard(DesktopAccountText.TrustStep, language) {
             AccountDecisionValue(DesktopAccountText.ApiOrigin, review.normalizedApiOrigin, language)
             AccountDecisionValue(DesktopAccountText.StreamOrigin, review.normalizedStreamOrigin, language)
             AccountDecisionValue(DesktopAccountText.ServerIdentity, review.serverIdentity, language)
@@ -141,31 +163,47 @@ internal fun DesktopAccountConnectionContent(owner: DesktopAccountUiOwner, langu
             AccountDecisionValue(DesktopAccountText.StreamFingerprint,
                 review.streamTlsFingerprint ?: if (review.streamUsesSystemTrust) DesktopAccountText.SystemTrust.text(language)
                 else DesktopAccountText.Unconfirmed.text(language), language)
-            var api by remember { mutableStateOf(false) }
-            var stream by remember { mutableStateOf(false) }
-            var identity by remember { mutableStateOf(false) }
-            AccountCheck(api, DesktopAccountText.VerifyApi.text(language)) { api = it }
-            AccountCheck(stream, DesktopAccountText.VerifyStream.text(language)) { stream = it }
-            AccountCheck(identity, DesktopAccountText.VerifyIdentity.text(language)) { identity = it }
-            Text(if (language == DesktopLanguage.Russian)
-                "Сначала выберите ниже: оставить данные локально или проверить выбранные записи. Выбор относится к этому серверу; аккаунт подтверждается отдельно при подключении."
-                else "First choose below: keep data local or review selected records. The choice applies to this server; confirm the account separately during connection.")
-            if (state.localChoiceSelected) Text(if (language == DesktopLanguage.Russian)
-                "Выбор локальных данных сохранён для подтверждения сервера." else "Local data choice captured for server confirmation.")
+            state.localChoiceSummary?.let { Text(it) }
+            if (owner.permit(DesktopAccountAction.ReviewLocal, null) != null && state.localDataReview == null)
+                AccountButton(owner, DesktopAccountAction.ReviewLocal, language)
+            if (state.localDataReview == null && owner.permit(DesktopAccountAction.KeepLocal, null) != null &&
+                state.localChangesSelected) AccountButton(owner, DesktopAccountAction.KeepLocal, language)
+            if (state.localDataReview != null) LocalDataReviewContent(owner, language)
             AccountButton(owner, DesktopAccountAction.ConfirmTransport, language, review.id,
-                enabled = api && stream && identity && (review.apiUsesSystemTrust || review.apiTlsFingerprint != null) &&
+                enabled = state.localChoiceSelected && (review.apiUsesSystemTrust || review.apiTlsFingerprint != null) &&
                     (review.streamUsesSystemTrust || review.streamTlsFingerprint != null),
-                command = { DesktopAccountCommand.ConfirmTransport(review.id, api, stream, identity) })
+                command = { DesktopAccountCommand.ConfirmTransport(review.id,
+                    apiConfirmed = true, streamConfirmed = true, identityConfirmed = true) })
         }
     } }
-    if (state.accountPublicId == null && owner.permit(DesktopAccountAction.LoginPortable, null) != null)
-        PortableLoginForm(owner, language)
-    AccountCard(DesktopAccountText.Invitation, language) {
+    val invitation = owner.permit(DesktopAccountAction.SubmitInvitation, null) != null
+    val admission = owner.permit(DesktopAccountAction.RequestAdmission, null) != null
+    val trusted = owner.permit(DesktopAccountAction.EnrollTrusted, null) != null
+    val register = owner.permit(DesktopAccountAction.RegisterPortable, null) != null
+    var more by remember { mutableStateOf(false) }
+    if (step != DesktopConnectionStep.Trust) {
+        TextButton(onClick = { more = !more }) {
+            Text(if (ru) "Другие способы подключения" else "More connection options")
+        }
+    }
+    if (more) {
+        DesktopAccountPinnedTransportContent(owner, language)
+        Text(DesktopAccountText.QrHelp.text(language))
+        AccountSecretForm(owner, DesktopAccountAction.SubmitQr, language, DesktopAccountText.QrInput)
+        AccountButton(owner, DesktopAccountAction.ChooseQrFile, language)
+        if (register && state.accountPublicId != null) AccountCard(DesktopAccountText.RegisterLocalAccount, language) {
+            AccountDecisionValue(DesktopAccountText.PublicId, state.accountPublicId, language)
+            state.localChoiceSummary?.let { Text(it) }
+            AccountSecretForm(owner, DesktopAccountAction.RegisterPortable, language, DesktopAccountText.Password)
+        }
+    }
+    val hasOtherSignIn = invitation || admission || trusted
+    if (((more || state.passwordLoginUnavailable) && hasOtherSignIn) || state.admissionId != null) AccountCard(DesktopAccountText.Invitation, language) {
         state.localChoiceSummary?.let { Text(it) }
-        AccountSecretForm(owner, DesktopAccountAction.SubmitInvitation, language, DesktopAccountText.Invitation)
-        AccountButton(owner, DesktopAccountAction.RequestAdmission, language)
+        if (invitation) AccountSecretForm(owner, DesktopAccountAction.SubmitInvitation, language, DesktopAccountText.Invitation)
+        if (admission) AccountButton(owner, DesktopAccountAction.RequestAdmission, language)
         state.admissionId?.let { AccountButton(owner, DesktopAccountAction.ResumeAdmission, language, it) }
-        AccountButton(owner, DesktopAccountAction.EnrollTrusted, language)
+        if (trusted) AccountButton(owner, DesktopAccountAction.EnrollTrusted, language)
         state.admissionId?.let { target -> key(target, state.admissionAccountLabel) {
             state.admissionAccountLabel?.let { label ->
                 AccountDecisionValue(DesktopAccountText.Account, label, language)
@@ -177,27 +215,24 @@ internal fun DesktopAccountConnectionContent(owner: DesktopAccountUiOwner, langu
                 }
             }
         } }
-        state.accountPublicId?.let { publicId -> key(publicId) {
-            if (owner.permit(DesktopAccountAction.RegisterPortable, null) != null ||
-                owner.permit(DesktopAccountAction.LoginPortable, null) != null) {
-                AccountDecisionValue(DesktopAccountText.Account, publicId, language)
-                var confirmed by remember { mutableStateOf(false) }
-                AccountCheck(confirmed, DesktopAccountText.ConfirmAccount.text(language)) { confirmed = it }
-                if (confirmed) {
-                    AccountSecretForm(owner, DesktopAccountAction.RegisterPortable, language, DesktopAccountText.Password)
-                    AccountSecretForm(owner, DesktopAccountAction.LoginPortable, language, DesktopAccountText.Password)
-                }
-            }
-        } }
     }
     state.invitationReview?.let { review -> key(review.id) {
         DesktopInvitationInputContent(owner, review, language)
     } }
+    if (step == DesktopConnectionStep.Trust || state.invitationReview != null)
+        AccountButton(owner, DesktopAccountAction.CancelConnection, language)
+    if (step == DesktopConnectionStep.Connected && (more || state.localDataReview != null)) LocalDataReviewContent(owner, language)
+    if (more) AccountButton(owner, DesktopAccountAction.Refresh, language)
+}
+
+@Composable
+private fun LocalDataReviewContent(owner: DesktopAccountUiOwner, language: DesktopLanguage): Unit {
+    val state = owner.state.connection
     AccountCard(DesktopAccountText.LocalReview, language) {
         Text(DesktopAccountText.LocalReviewHelp.text(language))
         val review = state.localDataReview
         AccountButton(owner, DesktopAccountAction.KeepLocal, language, review?.id ?: state.bindingId?.takeIf { state.transportReview == null })
-        AccountButton(owner, DesktopAccountAction.ReviewLocal, language, state.bindingId?.takeIf { state.transportReview == null })
+        if (state.transportReview == null) AccountButton(owner, DesktopAccountAction.ReviewLocal, language, state.bindingId)
         review?.let { current -> key(current.id) {
             AccountDecisionValue(DesktopAccountText.PublicId, current.accountPublicId, language)
             var selected by remember { mutableStateOf(emptyList<String>()) }
@@ -218,25 +253,25 @@ internal fun DesktopAccountConnectionContent(owner: DesktopAccountUiOwner, langu
                 AccountButton(owner, DesktopAccountAction.ReviewLocal, language, current.id, label = DesktopAccountText.Next.text(language))
             }
         } }
-        state.bindingId?.let { AccountButton(owner, DesktopAccountAction.Bind, language, it) }
-    }
-    AccountCard(DesktopAccountText.BasicStatus, language) {
-        Text(DesktopAccountText.BasicStatusHelp.text(language))
-        AccountStatus(state.condition, state.issue, language)
-        AccountButton(owner, DesktopAccountAction.Refresh, language)
     }
 }
 
 @Composable
-private fun AccountOriginForm(owner: DesktopAccountUiOwner, language: DesktopLanguage): Unit {
+public fun DesktopServerAddressStep(language: DesktopLanguage, enabled: Boolean,
+    createStorage: Boolean = false, onSubmit: (String) -> Unit): Unit {
     var origin by remember { mutableStateOf("") }
-    DisposableEffect(Unit) { onDispose { origin = "" } }
-    OutlinedTextField(origin, { if (it.length <= 2048) origin = it },
-        label = { Text(DesktopAccountText.Origin.text(language)) }, singleLine = true,
-        modifier = Modifier.fillMaxWidth(), enabled = owner.available(DesktopAccountAction.Discover))
-    AccountButton(owner, DesktopAccountAction.Discover, language, enabled = origin.isNotEmpty(), command = {
-        val command = DesktopAccountCommand.Discover(DesktopAccountSecret(origin)); origin = ""; command
-    })
+    val ru = language == DesktopLanguage.Russian
+    AccountCard(DesktopAccountText.AddressStep, language) {
+        OutlinedTextField(origin, { if (it.length <= 2048) origin = it }, enabled = enabled,
+            label = { Text(DesktopAccountText.Origin.text(language)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("https://…") })
+        if (createStorage) Text(if (ru)
+            "При продолжении AutPlay создаст хранилище аккаунтов на этом Mac. Данные входа защищает Связка ключей macOS. Локальные метаданные аккаунта хранятся без шифрования."
+            else "Continuing creates account storage on this Mac. macOS Keychain protects your credentials. Local account metadata is stored unencrypted.")
+        Button(onClick = { onSubmit(origin.trim()) }, enabled = enabled && origin.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+            Text(if (ru) "Продолжить" else "Continue")
+        }
+    }
 }
 
 @Composable

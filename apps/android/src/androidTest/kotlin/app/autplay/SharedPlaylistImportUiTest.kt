@@ -154,8 +154,9 @@ class SharedPlaylistImportUiTest {
 
     private fun openPlaylists() {
         val label = localizedAppContext(InstrumentationRegistry.getInstrumentation().targetContext, app.autplay.ui.AppLanguage.English).getString(R.string.nav_library)
-        compose.waitUntil(12_000) { compose.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNode(hasText(label) and hasClickAction()).performClick()
+        val tab = androidx.compose.ui.test.hasContentDescription(label) and hasClickAction()
+        compose.waitUntil(12_000) { compose.onAllNodes(tab).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(tab).performClick()
         compose.onNodeWithTag("library-sections").performScrollToNode(hasTestTag("library-tab-Playlists"))
         compose.onNodeWithTag("library-tab-Playlists").performClick()
     }

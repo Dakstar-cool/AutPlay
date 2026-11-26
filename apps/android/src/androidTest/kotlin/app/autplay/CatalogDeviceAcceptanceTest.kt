@@ -115,7 +115,7 @@ class CatalogDeviceAcceptanceTest {
     }
     private fun tapTag(tag: String) = node(hasTestTag(tag)).performClick()
     private fun action(label: Int) = node(hasText(strings.getString(label)) and hasClickAction()).performClick()
-    private fun library() = action(R.string.nav_library)
+    private fun library() = node(androidx.compose.ui.test.hasContentDescription(strings.getString(R.string.nav_library)) and hasClickAction()).performClick()
     private fun tile(tab: String, id: String) {
         node(hasTestTag("library-sections")).performScrollToNode(hasTestTag("library-tab-$tab"))
         tapTag("library-tab-$tab")
@@ -248,7 +248,7 @@ class CatalogDeviceAcceptanceTest {
         }
     }
 
-    private fun catalogue(edition: Boolean): ActivityScenario<ComponentActivity> {
+    private fun catalogue(edition: Boolean, selectArtistForDownload: Boolean = false): ActivityScenario<ComponentActivity> {
         val activity = ActivityScenario.launch(ComponentActivity::class.java)
         activity.onActivity { host ->
             host.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -259,6 +259,7 @@ class CatalogDeviceAcceptanceTest {
                         var selected by remember { mutableStateOf<String?>(null) }
                         Column(Modifier.verticalScroll(rememberScrollState())) {
                             InternetMetadataDiscoverySection("QA Quartet", LibrarySearchKind.Artist, 1,
+                                selectArtistForDownload = selectArtistForDownload,
                                 onPlaylistTrack = { selected = it },
                                 initialTarget = if (edition) InternetMetadataBrowseTarget(
                                     InternetMetadataDiscoveryEntity.RELEASE, value("release")) else null)
@@ -284,10 +285,8 @@ class CatalogDeviceAcceptanceTest {
             activity.onActivity { host -> host.setContent {
                 AutPlayTheme { app.autplay.ui.CoreProductDetailScreen(app.autplay.ui.CoreProductDetailUiState(target)) }
             } }
-            action(R.string.catalog_download_artist)
-            action(R.string.catalog_download_preview)
-            action(R.string.catalog_download_start)
-            node(hasText(strings.getString(R.string.catalog_download_vault_complete))).assertIsDisplayed()
+            tapTag("download-artist-$artist")
+            node(androidx.compose.ui.test.hasContentDescription(strings.getString(R.string.catalog_download_vault_complete), substring = true)).assertIsDisplayed()
         }
         assertTrue(db.localAudioDao().observeDownloadIntentsForProfile(value("profile"), 10).first().isEmpty())
         assertTrue(AutPlayRuntime.syncCoordinator(context, binding).run(binding))
@@ -358,14 +357,11 @@ class CatalogDeviceAcceptanceTest {
 
     @Test fun verifyDefaultArtistDownloadScope(): Unit = runBlocking {
         setup(true)
-        catalogue(false).use {
+        catalogue(false, selectArtistForDownload = true).use {
             val artist = hasTestTag("catalogue-card-musicbrainz:artist:${value("artist")}")
-            node(hasText(strings.getString(R.string.library_section_albums)) and hasAnyAncestor(artist)).performClick()
-            action(R.string.catalog_download_artist)
-            node(hasText(strings.getString(R.string.catalog_download_scope))).assertIsDisplayed()
+            node(hasTestTag("download-artist-${value("artist")}") and hasAnyAncestor(artist)).performClick()
             compose.onAllNodes(isToggleable()).assertCountEquals(0)
-            action(R.string.catalog_download_preview)
-            node(hasText(strings.getString(R.string.catalog_download_counts, 1, 0, 0, 1))).assertExists()
+            node(hasText(strings.getString(R.string.download_partial, 1, 2))).assertExists()
         }
     }
 
@@ -402,11 +398,8 @@ class CatalogDeviceAcceptanceTest {
     @Test fun startExplicitDownload(): Unit = runBlocking {
         catalogue(true).use {
             node(hasText("QA Tone")).assertExists()
-            action(R.string.catalog_download_release)
-            action(R.string.catalog_download_preview)
-            node(hasText(strings.getString(R.string.catalog_source_missing), substring = true)).assertExists()
-            action(R.string.catalog_download_start)
-            node(hasText(strings.getString(R.string.catalog_download_counts, 0, 1, 0, 1))).assertExists()
+            tapTag("download-release-${value("release")}")
+            node(hasText(strings.getString(R.string.download_catalog_processed, 1, 2))).assertExists()
         }
     }
 
@@ -429,11 +422,9 @@ class CatalogDeviceAcceptanceTest {
     @Test fun repeatExplicitDownload(): Unit = runBlocking {
         catalogue(true).use {
             node(hasText("QA Tone")).assertExists()
-            action(R.string.catalog_download_release)
-            action(R.string.catalog_download_preview)
-            node(hasText(strings.getString(R.string.catalog_download_counts, 1, 0, 0, 1))).assertExists()
-            action(R.string.catalog_download_start)
-            node(hasText(strings.getString(R.string.catalog_download_preview)) and hasClickAction()).assertExists()
+            node(hasText(strings.getString(R.string.download_partial, 1, 2))).assertExists()
+            tapTag("download-release-${value("release")}")
+            node(hasText(strings.getString(R.string.download_partial, 1, 2))).assertExists()
         }
     }
 

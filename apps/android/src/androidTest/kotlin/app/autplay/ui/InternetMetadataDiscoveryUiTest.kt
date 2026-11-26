@@ -142,12 +142,16 @@ class InternetMetadataDiscoveryUiTest {
     @Test fun completionIndicatorFollowsVaultAndDeviceDownload() {
         val port = FakePort()
         val work = FakeWork()
-        val status = MutableStateFlow(InternetMusicWorkStatus(listOf(WorkInfo.State.RUNNING)))
+        val status = MutableStateFlow(InternetMusicWorkStatus())
         work.values["search"] = status
         port.source = { _, _, _ -> InternetMusicSearch("search", listOf(InternetMusicCandidate("song", "Song", "Artist", "YouTube", 180000))) }
         compose.setContent { AutPlayTheme {
             InternetMusicSearchSection("Song", 1, session = InternetMusicUiSession(BINDING, port, work))
         } }
+        waitTag("source-actions-song")
+        compose.onNodeWithContentDescription(context.getString(R.string.music_add_download)).performClick()
+        assertEquals(listOf(WorkRequest(BINDING.serverProfileId.value, "search", "song", true)), work.requests.toList())
+        status.value = InternetMusicWorkStatus(listOf(WorkInfo.State.RUNNING))
         waitTag("source-progress-song")
         compose.onNodeWithTag("source-ready-song").assertDoesNotExist()
         status.value = InternetMusicWorkStatus(listOf(WorkInfo.State.SUCCEEDED))

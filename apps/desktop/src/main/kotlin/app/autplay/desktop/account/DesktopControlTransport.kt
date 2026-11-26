@@ -20,6 +20,7 @@ public enum class AccountControlFailure {
     TRUST_REQUIRED, CONTEXT_CHANGED, BUSY, CLOSED, DEADLINE, TRANSPORT_UNAVAILABLE,
     REDIRECT_REFUSED, AUTHENTICATION_REQUIRED, AUTHENTICATION_FAILED, FORBIDDEN, CONFLICT, EXPIRED,
     CAPACITY, UNSUPPORTED, SERVER_UNAVAILABLE, INVALID_RESPONSE, BINDING_RECONCILIATION_REQUIRED,
+    SERVER_CONNECTION_UNSUPPORTED, LOCAL_IDENTITY_UNAVAILABLE,
 }
 public class AccountControlException(public val code: AccountControlFailure) :
     IllegalStateException("ACCOUNT_CONTROL_$code") {
@@ -234,7 +235,7 @@ public class DesktopControlTransport : AutoCloseable {
                     }
                     val status = wire.responseCode
                     // Status precedence: never parse a secret error payload into ordinary diagnostics.
-                    if (status !in 200..299) throw AccountControlException(statusFailure(status))
+                    if (status !in 200..299) throw AccountControlException(statusFailure(status, endpoint))
                     fun single(name: String): String {
                         val values = wire.headerFields.entries.filter { it.key?.equals(name, true) == true }.flatMap { it.value }
                         controlRequire(values.size <= 1 && values.sumOf { it.length } <= 2048)
@@ -301,11 +302,14 @@ public class DesktopControlTransport : AutoCloseable {
         if (closed.compareAndSet(false, true)) { retire(); workers.shutdown(); clock.shutdown() }
     }
 
-    private fun statusFailure(status: Int): AccountControlFailure = when (status) {
+    private fun statusFailure(status: Int, endpoint: AccountEndpoint): AccountControlFailure = when (status) {
         in 300..399 -> AccountControlFailure.REDIRECT_REFUSED
         401 -> AccountControlFailure.AUTHENTICATION_REQUIRED
         403 -> AccountControlFailure.FORBIDDEN
-        404, 405, 501 -> AccountControlFailure.UNSUPPORTED
+        404, 405, 501 -> when (endpoint) {
+            AccountEndpoint.M5_DISCOVERY, AccountEndpoint.D1_DISCOVERY -> AccountControlFailure.SERVER_CONNECTION_UNSUPPORTED
+            else -> AccountControlFailure.UNSUPPORTED
+        }
         409 -> AccountControlFailure.CONFLICT
         410 -> AccountControlFailure.EXPIRED
         413, 429 -> AccountControlFailure.CAPACITY

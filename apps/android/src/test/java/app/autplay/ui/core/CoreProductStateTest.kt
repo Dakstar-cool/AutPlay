@@ -190,7 +190,6 @@ class CoreProductStateTest {
             ),
             recentlyPlayed = recent,
             recentlyAdded = recent,
-            playlists = emptyList(),
             libraryTracks = listOf(playable, metadataOnly),
             problems = emptyList(),
             recommendationError = false,

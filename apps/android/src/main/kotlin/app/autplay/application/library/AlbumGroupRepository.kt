@@ -16,7 +16,7 @@ public data class MetadataAlbum(
     public val members: List<MetadataAlbumMember>,
     public val addedAtMs: Long,
 ) {
-    public val artworkTrackId: String? get() = members.firstOrNull { it.hasArtwork }?.localUserTrackRefId
+    public val artworkTrackId: String? get() = (members.firstOrNull { it.hasArtwork } ?: members.firstOrNull())?.localUserTrackRefId
 }
 
 public data class MetadataAlbumMember(

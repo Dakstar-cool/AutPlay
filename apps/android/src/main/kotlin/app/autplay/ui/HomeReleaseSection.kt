@@ -1,6 +1,5 @@
 package app.autplay.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -8,17 +7,16 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -34,7 +32,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.autplay.R
 
@@ -45,10 +42,15 @@ internal fun HomeReleaseSection(releases: List<HomeReleaseUiItem>, onOpenRelease
     var showAll by rememberSaveable { mutableStateOf(false) }
     val title = stringResource(R.string.home_release_feed_title)
     Column(Modifier.testTag("home-releases-section"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { showAll = true }, modifier = Modifier.testTag("home-releases-all")) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+            if (releases.isNotEmpty()) TextButton(onClick = { showAll = true }, modifier = Modifier.testTag("home-releases-all")) {
                 Text(stringResource(R.string.home_release_feed_all))
             }
+        }
+        if (releases.isEmpty()) {
+            Text(stringResource(R.string.home_empty_releases), color = AutPlayTokens.colors.mutedText)
+            return@Column
         }
         val largeText = LocalDensity.current.fontScale >= 1.5f
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -59,19 +61,12 @@ internal fun HomeReleaseSection(releases: List<HomeReleaseUiItem>, onOpenRelease
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(releases, key = HomeReleaseUiItem::id) { release ->
-                    CollectionCoverTile(
-                        title = release.title,
-                        artworkTrackId = release.artworkTrackId,
-                        catalogCoverId = release.releaseMbid,
-                        subtitle = release.artist,
-                        caption = release.dateText?.takeIf { it.isNotBlank() },
-                        modifier = Modifier.width(coverWidth).testTag("home-release:${release.id}"),
-                    ) { onOpenRelease(release.id) }
+                    ReleaseCover(release, Modifier.width(coverWidth)) { onOpenRelease(release.id) }
                 }
             }
         }
     }
-    if (showAll) {
+    if (showAll && releases.isNotEmpty()) {
         ModalBottomSheet(
             onDismissRequest = { showAll = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -81,16 +76,18 @@ internal fun HomeReleaseSection(releases: List<HomeReleaseUiItem>, onOpenRelease
             Column(Modifier.fillMaxWidth().fillMaxHeight(0.8f).testTag("home-releases-sheet")) {
                 Text(title, Modifier.padding(horizontal = 20.dp, vertical = 12.dp).semantics { heading() },
                     style = MaterialTheme.typography.headlineSmall)
-                LazyColumn(
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(132.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.weight(1f).fillMaxWidth().testTag("home-releases-list"),
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 28.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(releases, key = HomeReleaseUiItem::id) { release ->
-                        HomeReleaseListRow(release, {
+                    gridItems(releases, key = HomeReleaseUiItem::id) { release ->
+                        ReleaseCover(release, Modifier.fillMaxWidth()) {
                             showAll = false
                             onOpenRelease(release.id)
-                        }, Modifier.fillMaxWidth())
+                        }
                     }
                 }
             }
@@ -99,43 +96,7 @@ internal fun HomeReleaseSection(releases: List<HomeReleaseUiItem>, onOpenRelease
 }
 
 @Composable
-private fun HomeReleaseListRow(
-    release: HomeReleaseUiItem,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.heightIn(min = 104.dp).testTag("home-release:${release.id}"),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, AutPlayTokens.colors.border.copy(alpha = 0.55f)),
-    ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AutPlayArtwork(release.title, size = 48.dp,
-                    trackId = release.artworkTrackId, catalogCoverId = release.releaseMbid)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(release.title, style = MaterialTheme.typography.labelLarge,
-                        maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    Text(release.artist, style = MaterialTheme.typography.bodySmall,
-                        color = AutPlayTokens.colors.mutedText,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            Text(
-                releaseCaption(release),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 2, overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
+private fun ReleaseCover(release: HomeReleaseUiItem, modifier: Modifier, onClick: () -> Unit) {
+    CollectionCoverTile(release.title, release.artworkTrackId, release.artist, modifier.testTag("home-release:${release.id}"),
+        caption = releaseYear(release.dateText), catalogCoverId = release.releaseMbid, onClick = onClick)
 }
-
-@Composable
-private fun releaseCaption(release: HomeReleaseUiItem): String =
-    release.dateText?.takeIf { it.isNotBlank() } ?: stringResource(
-        if (release.inLibrary) R.string.home_release_in_library else R.string.home_release_known_artist,
-    )

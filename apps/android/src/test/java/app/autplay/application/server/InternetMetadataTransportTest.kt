@@ -67,6 +67,17 @@ class InternetMetadataTransportTest {
     }
 
     @Test
+    fun busyArtistSearchRetriesTheSameReadAndReturnsItsResult() = runBlocking {
+        withRepository { server, repository ->
+            server.enqueue(errorResponse(503, "music_discovery_busy", true))
+            server.enqueue(success(page(ARTIST_PAGE, limit = 25, offset = 0)))
+            val result = repository.discoverMusic("Apashe", InternetMetadataDiscoveryKind.ARTIST)
+            assertEquals(ARTIST, result.items.single().browseTarget?.entityId)
+            assertEquals(take(server).path, take(server).path)
+        }
+    }
+
+    @Test
     fun returningToAnArtistRequestsOnlyTheReleaseUpdateForItsSavedBaseline() = runBlocking {
         withRepository { server, repository ->
             val full = buildJsonObject {

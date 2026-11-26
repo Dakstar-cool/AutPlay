@@ -14,7 +14,11 @@ internal data class ArtistRecording(
 ) {
     val catalogPerformers: List<Pair<String, String>> get() =
         card?.performerLinks().orEmpty()
-    val title get() = local?.title ?: card?.title
+    val title = card?.title ?: local?.let { appearance ->
+        val mainArtist = appearance.performers.firstOrNull()?.name
+        if (mainArtist == null) appearance.title else
+            app.autplay.application.artist.trackNames(appearance.title, mainArtist, hasArtist = true).title
+    }
     val displayKey get() = local?.displayKey ?: key
 }
 
@@ -24,7 +28,6 @@ internal fun artistRecordings(state: CoreProductDetailUiState): List<ArtistRecor
     val byLocalId = state.libraryRecordings.entries.associate { (mbid, id) -> id to mbid }
     val rows = linkedMapOf<String, ArtistRecording>()
     fun guest(card: InternetMetadataDiscoveryCard?) =
-        (card?.rawPayload?.get("artist_members") as? JsonArray).orEmpty().size > 1 ||
         (card?.rawPayload?.get("guest_artist_ids") as? JsonArray).orEmpty()
             .any { (it as? JsonPrimitive)?.content == state.artistMbid }
     for (local in state.artistAppearances.filter { it.subjectType == "RECORDING" }) {

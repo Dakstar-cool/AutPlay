@@ -47,6 +47,16 @@ internal sealed class DomainRoute(val method: String, val path: String, val requ
     class PreparePlayback : DomainRoute("POST", "/library/search/playback", 8192, 8192)
     class RecommendationPack : DomainRoute("POST", "/recommendation-packs", 4096, 720_896)
     class Recommendations : DomainRoute("POST", "/recommendations", 4096, 1_048_576)
+    class ArtistWelcome : DomainRoute("GET", "/artist-onboarding", 0, 1024)
+    class BrowseArtists : DomainRoute("POST", "/artist-onboarding/browse", 16384, 262144)
+    class FinishArtistWelcome : DomainRoute("POST", "/artist-onboarding/finish", 4096, 1024)
+    class StartCollection : DomainRoute("POST", "/collection-imports", 8192, 524288)
+    class RecentCollections : DomainRoute("GET", "/collection-imports", 0, 65536)
+    class ResumeCollection(id: AccountUuid) : DomainRoute("POST", "/collection-imports/${id.value}/resume", 0, 524288)
+    class CollectionPage(id: AccountUuid, offset: Int) : DomainRoute("GET", "/collection-imports/${id.value}", 0, 524288,
+        mapOf("offset" to offset.toString())) { init { require(offset in 0..10000) } }
+    class CancelCollection(id: AccountUuid) : DomainRoute("POST", "/collection-imports/${id.value}/cancel", 0, 8192)
+    class ConfirmCollection(id: AccountUuid) : DomainRoute("POST", "/collection-imports/${id.value}/confirm", 1024, 524288)
     class SharePlaylist : DomainRoute("POST", "/playlist-shares", 8_388_608, 16_384)
     class Discover(kind: String, query: String, offset: Int) : DomainRoute("GET", "/music/discovery/search", 0, 1_048_576,
         mapOf("q" to query, "kind" to kind, "limit" to "30", "offset" to offset.toString())) {
@@ -58,6 +68,14 @@ internal sealed class DomainRoute(val method: String, val path: String, val requ
         init { require((artist || !releases) && offset in 0..1_000_000) }
     }
     class ReleaseCover(id: AccountUuid) : DomainRoute("GET", "/music/discovery/releases/${id.value}/cover", 0, 1_048_576)
+    class AlbumTracklist(title: String?, artist: String?, mbid: AccountUuid?, discogsId: String?, year: String?) :
+        DomainRoute("GET", "/music/discovery/album-tracklist", 0, 2_097_152, buildMap {
+            title?.let { put("title", it.take(500)) }
+            artist?.let { put("artist", it.take(500)) }
+            mbid?.let { put("mbid", it.value) }
+            discogsId?.let { put("discogs_id", it) }
+            year?.let { put("year", it) }
+        })
     class CatalogueContext : DomainRoute("POST", "/music/discovery/contexts", 2048, 131_072)
     class CatalogueTrack(id: AccountUuid) : DomainRoute("POST", "/music/discovery/contexts/${id.value}/track-reference", 0, 65_536)
     class ArtistRanking(id: AccountUuid) : DomainRoute("GET", "/music/discovery/library-artists/${id.value}/ranking", 0, 1_048_576)

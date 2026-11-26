@@ -165,6 +165,7 @@ internal fun DesktopPlaylistTransfer(owner: Component?, store: DesktopLibrarySto
         catch (_: Exception) { feedback = if (ru) "Не удалось прочитать полученные плейлисты" else "Could not read received playlists" }
     }
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (music != null && lease != null) DesktopCollectionImport(music, lease, ru)
         TextButton(enabled = !busy, onClick = { run {
             val file = choosePlaylist(owner, false, ru) ?: return@run
             review = withContext(Dispatchers.IO) {

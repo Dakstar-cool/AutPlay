@@ -46,6 +46,7 @@ from autplay.domain.adaptive_recommendations import (
     TemporalEvidence,
     TemporalSignal,
 )
+from autplay.domain.artist_affinity import snapshot_artist_acts
 from autplay.domain.recommendations import (
     JsonValue,
     PipelineDefinition,
@@ -696,6 +697,8 @@ def snapshot_track_from_document(value: object) -> SnapshotTrack:
             if document.get("owner_identity_decision_id") is None
             else UUID(_source_string(document, "owner_identity_decision_id"))
         ),
+        starter_artist_weight=_source_optional_integer(document, "starter_artist_weight") or 0,
+        artist_acts=snapshot_artist_acts(document.get("artist_acts", [])),
         verified_audio_variant_id=(
             None
             if document.get("verified_audio_variant_id") is None

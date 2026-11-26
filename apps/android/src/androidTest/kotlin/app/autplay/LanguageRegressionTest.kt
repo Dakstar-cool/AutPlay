@@ -1,7 +1,7 @@
 package app.autplay
 
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import app.autplay.data.settings.*
@@ -50,10 +50,10 @@ class LanguageRegressionTest {
     }
     private fun awaitNavigation(language: AppLanguage) {
         val text = localizedAppContext(context, language).getString(R.string.nav_library)
-        compose.waitUntil(15_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(text).fetchSemanticsNodes().isNotEmpty() }
         compose.waitForIdle()
         val opposite = if (language == AppLanguage.Russian) AppLanguage.English else AppLanguage.Russian
         val oppositeText = localizedAppContext(context, opposite).getString(R.string.nav_library)
-        org.junit.Assert.assertTrue(compose.onAllNodesWithText(oppositeText).fetchSemanticsNodes().isEmpty())
+        org.junit.Assert.assertTrue(compose.onAllNodesWithContentDescription(oppositeText).fetchSemanticsNodes().isEmpty())
     }
 }

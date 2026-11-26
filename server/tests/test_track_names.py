@@ -18,6 +18,43 @@ def test_display_style_and_search_equivalence() -> None:
     assert search_label("25—17") == search_label("25/17")
 
 
+def test_source_sites_are_removed_from_files_and_credits() -> None:
+    assert track_names("[muzmo.ru] молчи speed up - Mp3on.net.mp3", "кис-кис | hitmos") == (
+        "молчи (Sped Up)",
+        "кис-кис",
+    )
+    assert track_names("Artist - [MUZMO.RU] - Title | www.lightaudio.ru", "Artist") == (
+        "Title",
+        "Artist",
+    )
+    assert track_names("Track (Live) (zaycev.net)", "https://hitmos.ru/ AC/DC") == (
+        "Track (Live)",
+        "AC/DC",
+    )
+    for literal in ("Hitmosaic", "my.muzmo.ru", "Band.fm", "AC/DC", "The Speed of Sound"):
+        assert track_names(literal, literal) == (literal, literal)
+
+
+def test_site_only_labels_stay_empty_until_real_evidence_arrives() -> None:
+    proof = {"source": "EMBEDDED", "source_id": "file", "normalization_version": "display-v7"}
+    doc = {"fields": {"artist": "[muzmo.ru] hitmos"}, "provenance": {"artist": proof}}
+    clean = project_names(doc, "Track", None)
+    assert clean["fields"]["artist"] is None
+    assert clean["name_originals_v1"]["artist"]["value"] == "[muzmo.ru] hitmos"
+    assert project_names(clean, "Track", None) is clean
+    for site in ("[muzmo.ru]", "hitmos.mp3"):
+        result = project_names({}, site, "hitmos")
+        assert result["fields"] == {"title": None, "artist": None}
+        assert project_names(result, site, "hitmos") is result
+        assert project_names(result, "Song", "Artist")["fields"] == {
+            "title": "Song",
+            "artist": "Artist",
+        }
+    for source in ("USER", "MUSICBRAINZ"):
+        protected = {"fields": doc["fields"], "provenance": {"artist": {**proof, "source": source}}}
+        assert project_names(protected, "Track", None) is protected
+
+
 def test_backfill_keeps_locked_names_explicit_clears_and_originals() -> None:
     doc = {
         "fields": {"title": "  My mix ", "artist": None},
@@ -128,11 +165,11 @@ def test_stage_names_work_for_artists_outside_the_curated_table() -> None:
 def test_title_boundaries_preserve_guest_cover_and_remixer_credits() -> None:
     assert track_names("Письмо_для_Мая.mp3", "Мая") == ("Письмо для Мая", "Мая")
     credit = "Север (настоящее имя Иван Л.) feat. Мая"
-    assert track_names("Cold ft. HS87", credit) == ("Cold ft. HS87", "Север feat. Мая")
+    assert track_names("Cold ft. HS87", credit) == ("Cold", "Север feat. Мая, HS87")
     assert (
         track_names("Cold", "Север (настоящее имя Иван Л.) (feat. Мая)")[1] == "Север (feat. Мая)"
     )
-    assert track_names("The_End_ft._RO", "RO")[0] == "The End ft. RO"
+    assert track_names("The_End_ft._RO", "RO") == ("The End", "RO")
     assert track_names("Mercy (LoSt. Remix)", "LoSt.")[0] == "Mercy (LoSt. Remix)"
     assert (
         track_names("Song (Original Artist cover)", "Cover Band")[0]
@@ -143,3 +180,60 @@ def test_title_boundaries_preserve_guest_cover_and_remixer_credits() -> None:
     assert track_names("Cover", "Group / Soloist")[1] == "Group / Soloist"
     doc = {"fields": {"composer": "Real Name"}}
     assert project_names(doc, "Piece", "Project Name") is doc
+
+
+def test_featured_guests_are_projected_together_and_survive_reprojection() -> None:
+    raw, primary = "Рядом быть feat. Хелависа&#x20;", "После 11"
+    expected = {"title": "Рядом быть", "artist": "После 11 feat. Хелависа"}
+    proof = {"source": "EMBEDDED", "source_id": "tags", "normalization_version": "display-v8"}
+    artist_tag = {"fields": {"artist": primary}, "provenance": {"artist": proof}}
+    before = project_names(artist_tag, raw, primary)
+    replaced = project_names(before, "Другая песня feat. Другой гость", primary)
+    assert replaced["fields"] == {"title": "Другая песня", "artist": "После 11 feat. Другой гость"}
+    for initial, raw_title in (
+        ({}, raw),
+        ({"fields": {"title": raw}, "provenance": {"title": proof}}, "01.mp3"),
+        (
+            {
+                "fields": {"title": raw, "artist": primary},
+                "provenance": {"title": proof, "artist": proof},
+            },
+            raw,
+        ),
+    ):
+        result = project_names(initial, raw_title, primary)
+        assert result["fields"] == expected
+        assert project_names(result, raw_title, primary) is result
+    assert track_names("Song [Ft. A & B] (Live)", "Lead feat. A") == (
+        "Song (Live)",
+        "Lead feat. A, B",
+    )
+    assert track_names("Song featuring Guest", "Lead, Guest") == ("Song", "Lead, Guest")
+    assert track_names("death bed | Feat. beabadoobee", "Powfu") == (
+        "death bed",
+        "Powfu feat. beabadoobee",
+    )
+    assert track_names("6 ft Under", "Singer") == ("6 ft Under", "Singer")
+    assert track_names("[IKO NICE ft DJ BEN]", "NAITA") == ("IKO NICE", "NAITA feat. DJ BEN")
+    assert track_names("[NAITA ft DJ BEN]", "NAITA") == ("[NAITA ft DJ BEN]", "NAITA")
+    assert track_names("[IKO NICE ft DJ BEN]", None) == ("[IKO NICE ft DJ BEN]", None)
+    assert track_names("Be Your Friend (Vigiland Feat. Alexander Tidebrink)", "Vigiland") == (
+        "Be Your Friend",
+        "Vigiland feat. Alexander Tidebrink",
+    )
+    assert track_names("Duet (Rock Remix feat. Tom)", "Singer") == (
+        "Duet (Rock Remix)",
+        "Singer feat. Tom",
+    )
+    assert track_names("Duet +feat. Tom #live", "Singer") == ("Duet #live", "Singer feat. Tom")
+    assert track_names("Great feat of strength", "Lead") == ("Great feat of strength", "Lead")
+    assert track_names("Song (Guest feat. B Remix)", "Lead") == (
+        "Song (Guest feat. B Remix)",
+        "Lead",
+    )
+    assert track_names(raw, None) == (raw, None)
+    locked = {
+        "fields": {"artist": "Chosen"},
+        "provenance": {"artist": {"source": "USER", "locked": True}},
+    }
+    assert project_names(locked, raw, primary) is locked

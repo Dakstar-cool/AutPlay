@@ -1,5 +1,7 @@
 package app.autplay
 
+import app.autplay.data.local.dao.RecentRelevantReleaseRow
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
@@ -122,6 +124,7 @@ internal class OfflineCoreDetailState(private val artistCache: ArtistPageCache =
         target: DetailTarget?,
         profileId: String?,
         contextKey: String,
+        weeklyRelease: RecentRelevantReleaseRow? = null,
         reportError: (String) -> Unit,
     ) {
         val request = requestGuard.begin(contextKey, profileId, target)
@@ -141,7 +144,7 @@ internal class OfflineCoreDetailState(private val artistCache: ArtistPageCache =
                     }
                 }
                 DetailKind.Release -> {
-                    val loadedRelease = repository.releaseDetail(target.stableId, profileId)
+                    val loadedRelease = repository.releaseDetail(target.stableId, profileId, weeklyRelease)
                     val credits = loadedRelease?.serverReleaseId?.let { releaseId ->
                         loadSubjectCredits(artistCatalogPort, profileId, SUBJECT_RELEASE, releaseId.value)
                     }.orEmpty()
@@ -257,6 +260,7 @@ internal fun rememberOfflineCoreDetailState(
     profileId: String?,
     contextKey: String,
     ownerKey: String,
+    weeklyRelease: RecentRelevantReleaseRow? = null,
     reportError: (String) -> Unit,
 ): OfflineCoreDetailState {
     val cache = remember(ownerKey, profileId, repository, artistCatalogPort) { ArtistPageCache() }
@@ -265,20 +269,20 @@ internal fun rememberOfflineCoreDetailState(
     val state = remember(cache, contextKey, route) {
         OfflineCoreDetailState(cache).also { it.restoreArtist(profileId, contextKey, route) }
     }
-    LaunchedEffect(state) {
+    LaunchedEffect(state, weeklyRelease) {
         if (route?.kind == DetailKind.Artist) {
             snapshotFlow { cache.revision }.conflate().collect {
-                state.load(repository, artistCatalogPort, route, profileId, contextKey, reportError)
+                state.load(repository, artistCatalogPort, route, profileId, contextKey, reportError = reportError)
             }
         } else if (target?.kind == DetailKind.Track) {
             repository.trackMetadataChanges(target.stableId, profileId).collectLatest {
-                state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
+                state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError = reportError)
             }
         } else if (target?.kind in setOf(DetailKind.Release, DetailKind.Playlist)) {
             repository.releaseChanges().collectLatest {
-                state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
+                state.load(repository, artistCatalogPort, target, profileId, contextKey, weeklyRelease, reportError)
             }
-        } else state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError)
+        } else state.load(repository, artistCatalogPort, target, profileId, contextKey, reportError = reportError)
     }
     return state
 }
@@ -312,7 +316,9 @@ internal fun rememberArtistRanking(context: android.content.Context, binding: ap
                 .mapNotNull { (id, count) -> count.toString().toLongOrNull()?.takeIf { it >= 0 }?.let { id to it } }.toMap()
             val identities = (value["library_recordings"] as? kotlinx.serialization.json.JsonObject).orEmpty()
                 .mapNotNull { (mbid, id) -> (id as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { mbid to it } }.toMap()
-            return ArtistPopularity((value["artist_mbid"] as? kotlinx.serialization.json.JsonPrimitive)?.content,
+            val mbid = (value["artist_mbid"] as? kotlinx.serialization.json.JsonPrimitive)
+                ?.takeIf { it.isString }?.content?.takeIf { runCatching { java.util.UUID.fromString(it).toString() == it }.getOrDefault(false) }
+            return ArtistPopularity(mbid,
                 counts("counts"), counts("recording_counts"), identities)
         }
         fun publish(value: ArtistPopularity) {

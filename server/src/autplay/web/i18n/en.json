@@ -1,4 +1,12 @@
 {
+  "music_operations": "Music operations",
+  "normalize_names": "Track titles and artists",
+  "normalize_names_scope": "Check downloaded Vault recordings and update titles and artist credits in user libraries.",
+  "normalization_last_run": "Last run",
+  "watch_normalization": "View live progress",
+  "run_normalization": "Run normalization",
+  "download_track_now": "Download a track",
+  "library_checks": "Library checks",
   "mpw_first_seen": "First seen",
   "mpw_listed": "Listed in US iTunes",
   "mpw_absent": "Absent from US iTunes",

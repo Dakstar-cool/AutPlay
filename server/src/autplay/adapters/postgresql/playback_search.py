@@ -231,15 +231,17 @@ def search_playback_page(
                 "duration_ms",
             )
         }
+        public = row["ref"] is None
         fallback_title, fallback_artist = track_names(
-            row["original_label"] or row["title"], row["artist"]
+            row["title"] if public and row["has_title"] else row["original_label"] or row["title"],
+            row["artist"],
+            filename=not (public and row["has_title"]),
+            catalog=recording_credit(row["members"]),
+            move_featured=public or not (row["has_title"] or row["has_artist"]),
         )
-        if not row["has_title"]:
+        if public or not row["has_title"]:
             result["title"] = fallback_title
-        linked = recording_credit(row["members"])
-        if linked and row["artist"] and linked.matches(row["artist"]):
-            result["artist"] = linked.preferred
-        elif not row["has_artist"]:
+        if public or not row["has_artist"]:
             result["artist"] = fallback_artist
         if row["version_text"]:
             result["title"] = f"{result['title']} {row['version_text']}"

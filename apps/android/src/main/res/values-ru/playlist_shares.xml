@@ -10,7 +10,7 @@
     <string name="playlist_preview">Открыть</string>
     <string name="playlist_import_needs_account">Войдите в аккаунт, в который хотите сохранить плейлист.</string>
     <string name="playlist_invalid_file">Не удалось открыть плейлист. Проверьте ссылку или выберите файл AutPlay либо список «Исполнитель — Трек».</string>
-    <string name="playlist_save_count">Треков в плейлисте: %1$d. Они появятся в «Моей любимой музыке» и будут учитываться в рекомендациях.</string>
+    <string name="playlist_save_count">Треков в плейлисте: %1$d.</string>
     <string name="playlist_save_copy">Сохранить копию</string>
     <string name="playlist_copy_saved">Плейлист сохранён</string>
     <string name="playlist_save_error">Не удалось сохранить плейлист. Попробуйте ещё раз.</string>

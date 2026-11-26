@@ -3,6 +3,7 @@ package app.autplay
 import app.autplay.application.artist.artistSearchKey
 import app.autplay.application.artist.musicSearchKey
 import app.autplay.application.artist.RoomArtistCatalogPort
+import app.autplay.application.artist.TrackTitleQuery
 import app.autplay.application.library.CoreProductRepository
 import app.autplay.data.local.AutPlayDatabase
 import app.autplay.application.artist.artistScope
@@ -29,6 +30,7 @@ internal class PersonalLibrarySearch(
         val state = LibraryScreenUiState(localMode = profile == null, tracks = emptyList(), section = section, filter = filter)
         val owner = profile ?: "legacy-unscoped"
         val titleQuery = musicSearchKey(query)
+        val trackQuery = TrackTitleQuery(query)
         val artistQuery = artistSearchKey(app.autplay.application.artist.StageCredits.display(query.trim()))
         fun matches(value: String?) = value != null && titleQuery in musicSearchKey(value)
         fun matchesCredit(credit: String?) = credit != null && artistQuery in artistSearchKey(credit)
@@ -36,7 +38,7 @@ internal class PersonalLibrarySearch(
             LibrarySection.Tracks -> library.libraryEntries(profile).map { rows ->
                 state.copy(tracks = rows.filter { (filter != LibraryFilter.Loved || it.loved) &&
                     (filter != LibraryFilter.OnDevice || it.onDevice) &&
-                    (matches(it.title) || matchesCredit(it.artistName)) }.map {
+                    (trackQuery.matches(it.title) || matchesCredit(it.artistName)) }.map {
                     CoreTrackUiItem(it.localUserTrackRefId, it.title.orEmpty(), it.artistName, loved = it.loved)
                 })
             }
@@ -45,7 +47,7 @@ internal class PersonalLibrarySearch(
             }
             LibrarySection.Albums -> library.releaseSummaries(profile, Int.MAX_VALUE).map { rows ->
                 state.copy(albums = rows.filter { matches(it.title) || matchesCredit(it.artistName) }.map {
-                    CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount, it.artworkTrackId, it.mbid)
+                    CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount, it.artworkTrackId, it.mbid, it.releaseDateText)
                 })
             }
             LibrarySection.Playlists -> database.playlistDao().libraryPlaylists(owner, Int.MAX_VALUE).map { rows ->

@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select, text
@@ -20,6 +21,64 @@ from autplay.ports.track_metadata import MetadataProviderError
 class CatalogPageCache:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self.sessions = sessions
+
+    def visible_album_positions(
+        self, owner: UUID, album: str, artist: str, year: int | None
+    ) -> list[dict[str, Any]]:
+        """Position evidence only from recordings this account can play."""
+        with self.sessions() as session:
+            rows = (
+                session.execute(
+                    text(f"""
+                SELECT DISTINCT t.recording_id::text AS recording, t.title,
+                    credit.display_name AS artist,
+                    m.position AS disc, t.sequence_no AS sequence, t.number_text AS number,
+                    coalesce(t.duration_ms, r.duration_ms) AS duration_ms,
+                    NULL::text AS mb_recording
+                FROM catalog.release rel
+                JOIN catalog.artist_credit a ON a.artist_credit_id=rel.artist_credit_id
+                JOIN catalog.medium m USING(release_id)
+                JOIN catalog.release_track t USING(medium_id)
+                JOIN catalog.artist_credit credit ON credit.artist_credit_id=t.artist_credit_id
+                JOIN catalog.recording r ON r.recording_id=t.recording_id
+                WHERE lower(rel.title)=lower(:album) AND lower(a.display_name)=lower(:artist)
+                  AND (CAST(:year AS integer) IS NULL OR rel.release_date IS NULL
+                       OR extract(year FROM rel.release_date)=:year)
+                  AND rel.deleted_at IS NULL AND m.deleted_at IS NULL AND t.deleted_at IS NULL
+                  AND (EXISTS (SELECT FROM ({OWNER_AUDIO}) own WHERE own.user_id=:owner
+                            AND own.recording_id=r.recording_id)
+                    OR EXISTS (SELECT FROM ({PUBLISHED_AUDIO}) pub
+                               WHERE pub.recording_id=r.recording_id))
+                UNION
+                SELECT u.recording_id::text, coalesce(nullif(f->>'title',''),u.raw_title,r.title),
+                    coalesce(nullif(f->>'artist',''),u.raw_artist,credit.display_name),
+                    CASE WHEN f->>'disc_number' ~ '^[1-9][0-9]{{0,3}}$'
+                         THEN (f->>'disc_number')::int END,
+                    CASE WHEN f->>'track_number' ~ '^[1-9][0-9]{{0,3}}$'
+                         THEN (f->>'track_number')::int END,
+                    NULL, v.duration_ms, f->>'mb_recording_id'
+                FROM library.user_track_ref u
+                JOIN catalog.recording r USING(recording_id)
+                JOIN catalog.artist_credit credit USING(artist_credit_id)
+                LEFT JOIN library.track_metadata md USING(user_track_ref_id)
+                CROSS JOIN LATERAL (SELECT md.document->'fields' AS f) meta
+                JOIN ({OWNER_AUDIO}) own ON own.user_id=u.user_id
+                  AND own.recording_id=u.recording_id
+                JOIN vault.audio_variant v ON v.audio_variant_id=own.audio_variant_id
+                WHERE u.user_id=:owner AND u.deleted_at IS NULL AND u.resolution_status='RESOLVED'
+                  AND lower(coalesce(nullif(f->>'album',''),u.raw_album))=lower(:album)
+                  AND lower(coalesce(nullif(f->>'album_artist',''),
+                            (regexp_split_to_array(coalesce(nullif(f->>'artist',''), u.raw_artist,
+                                    credit.display_name), ' +(feat[.]?|ft[.]?|featuring) +','i'))[1]
+                          ))=lower(:artist)
+                LIMIT 5001
+            """),
+                    {"owner": owner, "album": album, "artist": artist, "year": year},
+                )
+                .mappings()
+                .all()
+            )
+            return [dict(row) for row in rows] if len(rows) <= 5000 else []
 
     def available_recordings(self, owner: UUID, mbids: list[str]) -> dict[str, str]:
         if not mbids:
@@ -47,6 +106,24 @@ class CatalogPageCache:
                         WHERE p.provider_key='musicbrainz' AND p.deleted_at IS NULL
                           AND x.external_entity_type='RECORDING' AND x.deleted_at IS NULL
                           AND x.external_id=d.mbid AND x.recording_id <> d.recording_id)
+                UNION ALL
+                SELECT f->>'mb_recording_id', min(u.recording_id::text)::uuid, 2
+                FROM library.track_metadata md
+                JOIN library.user_track_ref u USING(user_track_ref_id)
+                CROSS JOIN LATERAL (SELECT md.document->'fields' AS f) tags
+                JOIN ({OWNER_AUDIO}) own ON own.recording_id=u.recording_id
+                  AND own.user_id=u.user_id
+                WHERE u.user_id=:owner AND u.deleted_at IS NULL AND u.resolution_status='RESOLVED'
+                  AND f->>'mb_recording_id'=ANY(:mbids)
+                  AND md.document#>>'{{provenance,mb_recording_id,source}}'='MUSICBRAINZ'
+                  AND md.document#>>'{{provenance,mb_recording_id,source_id}}'=
+                      'musicbrainz:release:' || (f->>'mb_release_id')
+                  AND NOT EXISTS (SELECT FROM identity.external_reference x
+                    JOIN identity.source_provider p USING(provider_id)
+                    WHERE p.provider_key='musicbrainz' AND p.deleted_at IS NULL
+                      AND x.external_entity_type='RECORDING' AND x.deleted_at IS NULL
+                      AND x.external_id=f->>'mb_recording_id' AND x.recording_id<>u.recording_id)
+                GROUP BY f->>'mb_recording_id' HAVING count(DISTINCT u.recording_id)=1
                 ) visible ORDER BY mbid, priority, recording_id
             """),
                     {"owner": owner, "mbids": mbids},

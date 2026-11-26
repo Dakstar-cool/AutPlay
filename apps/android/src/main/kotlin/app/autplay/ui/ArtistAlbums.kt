@@ -11,6 +11,9 @@ import app.autplay.application.server.InternetMetadataDiscoveryEntity
 import app.autplay.ui.core.DetailKind
 import app.autplay.ui.core.DetailTarget
 
+internal fun releaseYear(date: String?): String? =
+    date?.substringBefore('-')?.takeIf { it.length == 4 && it.all(Char::isDigit) }
+
 internal data class ArtistAlbumTile(
     val key: String,
     val title: String?,
@@ -20,9 +23,10 @@ internal data class ArtistAlbumTile(
     val mbid: String?,
     val artist: String? = null,
     val group: String? = null,
+    val artworkTrackId: String? = null,
 ) {
     val target: DetailTarget? get() = localId?.let { DetailTarget(DetailKind.Release, it) }
-        ?: mbid?.let { DetailTarget(DetailKind.CatalogRelease, it, title) }
+        ?: mbid?.let { DetailTarget(DetailKind.CatalogRelease, it, title, artist) }
 }
 
 internal fun artistAlbums(
@@ -33,15 +37,18 @@ internal fun artistAlbums(
     val cards = publicEditions.filter { it.browseTarget?.entity == InternetMetadataDiscoveryEntity.RELEASE }
         .associateBy { it.entityId }
     val catalogRows = appearances.filter { it.subjectType == "RELEASE" }
+    val artwork = localAlbums.associate { it.stableId to it.artworkTrackId }
     val local = catalogRows.map { row ->
+        val localId = (row.localTarget as? ArtistLocalTarget.Release)?.localReleaseId
         ArtistAlbumTile(row.displayKey, row.title, row.releaseDate, row.releaseStatus == "OFFICIAL",
-            (row.localTarget as? ArtistLocalTarget.Release)?.localReleaseId, row.releaseMbid, row.albumArtist, row.releaseGroup)
+            localId, row.releaseMbid, row.albumArtist, row.releaseGroup,
+            artwork[localId] ?: row.subjectId?.let { artwork[editionTargetId(it.value)] })
     }
     val seen = local.mapNotNull { it.localId }.toSet() + catalogRows.filter { it.localTarget != null }
         .mapNotNull { it.subjectId?.value?.let(::editionTargetId) }
     val tiles = local + localAlbums.filterNot { it.stableId in seen }.map { album ->
         ArtistAlbumTile(album.stableId, album.title, album.releaseDateText, false, album.stableId, album.mbid,
-            album.artistName, album.releaseGroup)
+            album.artistName, album.releaseGroup, album.artworkTrackId)
     }
     fun publicGroup(mbid: String?) = (cards[mbid]?.rawPayload?.get("release_group_id") as? JsonPrimitive)?.content
     val publicByLocalGroup = tiles.mapNotNull { tile ->
@@ -76,6 +83,8 @@ internal fun artistAlbums(
             .thenByDescending { it.mbid != null }.thenBy { it.date ?: "9999" }.thenBy { it.key }).first()
         val ids = editions.mapNotNull { it.localId }.distinct().sorted()
         first.copy(localId = if (ids.size < 2) first.localId else ARTIST_ALBUM_PREFIX + ids.joinToString("|"),
+            date = first.date ?: editions.mapNotNull { it.date }.minOrNull(),
+            artworkTrackId = first.artworkTrackId ?: editions.firstNotNullOfOrNull { it.artworkTrackId },
             mbid = first.mbid ?: editions.firstNotNullOfOrNull { it.mbid }, official = editions.any { it.official })
     }.sortedWith(compareByDescending<ArtistAlbumTile> { it.date }
         .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title.orEmpty() }.thenBy { it.key })

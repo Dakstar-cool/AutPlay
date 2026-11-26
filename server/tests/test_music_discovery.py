@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from unittest.mock import Mock
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
 
 import pytest
 from autplay.adapters.postgresql.catalog_pages import CatalogPageCache
 from autplay.application.artist_overview import artist_overview_view, build_artist_overview
+from autplay.application.catalog_downloads import CatalogDownloads
 from autplay.application.music_discovery import MusicDiscoveryService
 from autplay.application.music_library import MusicError
 from autplay.domain.auth import AccountRole, Principal
@@ -40,6 +44,27 @@ def test_catalogue_card_is_namespaced_evidence_and_never_a_selected_source(
     else:
         assert view["download_search_query"] == "AC/DC Song (Live / Remix)"
         assert view["can_browse_tracks"] is False
+
+
+def test_official_release_priority_uses_only_requested_recordings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artist = Principal(uuid4(), uuid4(), uuid4(), AccountRole.USER)
+    first, other = uuid4(), uuid4()
+    document = json.dumps({"recordings": [{"id": str(first)}, {"id": str(uuid4())}]}).encode()
+    reader = Mock(side_effect=[MetadataProviderError("metadata_provider_busy"), document, None])
+    pause = Mock()
+    monkeypatch.setattr("autplay.application.music_discovery.time.sleep", pause)
+    service = MusicDiscoveryService(Mock(), read_public=reader)
+    assert service.official_recordings(artist, [first, other]) == {str(first)}
+    pause.assert_called_once()
+    principal, url = reader.call_args.args
+    params = parse_qs(urlsplit(url).query)
+    assert principal == artist and params["limit"] == ["2"]
+    assert params["query"] == [
+        "status:official AND (" + " OR ".join(f'rid:"{r}"' for r in sorted([first, other])) + ")"
+    ]
+    assert service.official_recordings(artist, [first]) == set()
 
 
 def test_source_lookup_suggestion_requires_artist_and_keeps_complete_versions() -> None:
@@ -74,6 +99,30 @@ def test_disambiguation_only_versions_survive_lookup_and_conflicting_titles_need
         recording_title="Song (Live)",
     )
     assert conflicting.download_search_query is None
+    session = replace(card, disambiguation="Stabal Session")
+    assert session.download_search_query == "Artist Song (Stabal Session)"
+    assert replace(session, recording_title="Song (Another Session)").download_search_query is None
+
+
+def test_discography_prefers_the_official_standard_recording_and_keeps_distinct_editions() -> None:
+    state: dict[str, Any] = {"scope": {"kind": "artist"}, "recordings": {}}
+    for title, note, official in (
+        ("Song", "Stabal Session", True),
+        ("Song (Slowed)", None, False),
+        ("Song", None, False),
+        ("The Session", None, True),
+    ):
+        key = str(uuid4())
+        CatalogDownloads._add(
+            state, {"recording_id": key, "title": title, "disambiguation": note}, official=official
+        )
+    ordered = sorted(state["recordings"].values(), key=lambda item: item["priority"])
+    assert [item["source_title"] for item in ordered] == [
+        "The Session",
+        "Song",
+        "Song (Stabal Session)",
+        "Song (Slowed)",
+    ]
 
 
 def test_paging_advances_by_raw_rows_and_honestly_marks_offset_ceiling() -> None:

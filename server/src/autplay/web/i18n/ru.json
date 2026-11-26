@@ -1,4 +1,12 @@
 {
+  "music_operations": "Операции с музыкой",
+  "normalize_names": "Названия и исполнители",
+  "normalize_names_scope": "Проверить скачанные записи Vault и обновить их названия и исполнителей в библиотеках пользователей.",
+  "normalization_last_run": "Последний запуск",
+  "watch_normalization": "Следить за выполнением",
+  "run_normalization": "Запустить нормализацию",
+  "download_track_now": "Скачать трек",
+  "library_checks": "Проверка библиотеки",
   "mpw_first_seen": "Обнаружено",
   "mpw_listed": "Есть в каталоге iTunes США",
   "mpw_absent": "Нет в каталоге iTunes США",

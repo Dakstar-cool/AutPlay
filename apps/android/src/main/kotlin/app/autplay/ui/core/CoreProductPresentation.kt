@@ -91,7 +91,6 @@ internal fun buildHomeScreenUiState(
     continueListening: CoreResumeQueueSummary?,
     recentlyPlayed: List<CoreHomeTrackSummary>,
     recentlyAdded: List<CoreHomeTrackSummary>,
-    playlists: List<CoreHomePlaylistSummary>,
     libraryTracks: List<CoreTrackSummary>,
     problems: List<HomeProblemUiItem>,
     recommendationError: Boolean,
@@ -125,7 +124,6 @@ internal fun buildHomeScreenUiState(
         .map { HomeTrackUiItem(it.stableId, it.title ?: untitledTrack, it.artistName) },
     recentlyAdded = recentlyAdded.filter { it.stableId in playableTrackIds }
         .map { HomeTrackUiItem(it.stableId, it.title ?: untitledTrack, it.artistName) },
-    playlists = playlists.map { CoreCollectionUiItem(it.stableId, it.title, it.description) },
     offlineReady = libraryTracks.filter(CoreTrackSummary::downloaded).take(8)
         .map { HomeTrackUiItem(it.stableId, it.title, it.artist) },
     problems = problems,
@@ -180,7 +178,7 @@ internal fun buildLibraryScreenUiState(
         },
         artistBrowseState = artistBrowseState,
         playlists = playlists.map { CoreCollectionUiItem(it.stableId, it.title, it.description, artworkTrackId = it.artworkTrackId) },
-        albums = releases.map { CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount, it.artworkTrackId, it.mbid) },
+        albums = releases.map { CoreCollectionUiItem(it.stableId, it.title, it.artistName, it.ownedTrackCount, it.artworkTrackId, it.mbid, it.releaseDateText) },
         reviewCount = reviewCount,
         importingLocalTrack = importingLocalTrack,
         lastImportedTitle = lastImportedTitle,

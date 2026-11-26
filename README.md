@@ -1,106 +1,93 @@
-# <img src="assets/readme/autplay-logo.svg" width="48" alt="Логотип AutPlay"> AutPlay
+<p align="center"><img src="assets/readme/autplay-logo.svg" width="72" height="72" alt="Логотип AutPlay"></p>
+<h1 align="center">AutPlay</h1>
 
-Музыкальный плеер для Android и Mac. Добавьте свои записи, соберите плейлист или включите «Мою волну». Локальную библиотеку можно слушать офлайн. Личный сервер Sona добавляет общий каталог, синхронизацию и совместное прослушивание.
+<p align="center"><strong>Музыкальная библиотека и плеер для Android и Mac</strong></p>
 
-**[Скачать AutPlay][downloads]** · [Установка Android и Mac][guide] · [Что нового в 1.0.16][notes]
+Добавьте свои аудиофайлы и слушайте их офлайн. Включите **«Мою волну»**, чтобы заново открыть музыку из коллекции. С личным сервером **Sona** можно переносить плейлисты, искать издания альбомов и слушать вместе на Android.
 
-## Что умеет AutPlay
+**[Скачать для Android][apk]** · **[Скачать для Mac][dmg]** · [Установка][guide] · [Что нового в 1.0.17][notes]
+
+## Интерфейс
 
 <p align="center">
-  <a href="assets/readme/android-home.webp"><img src="assets/readme/android-home.webp" width="29%" alt="Главная с «Моей волной», подборками и треком Walkways — All For You"></a>
-  <a href="assets/readme/android-player.webp"><img src="assets/readme/android-player.webp" width="29%" alt="Плеер с обложкой All For You, оценками, скачиванием и таймером сна"></a>
-  <a href="assets/readme/android-albums.webp"><img src="assets/readme/android-albums.webp" width="29%" alt="Альбомы HATE FUNK и Calming в библиотеке Android"></a>
+  <a href="assets/readme/android-home.webp"><img src="assets/readme/android-home.webp" width="30%" alt="Android. Главная с треком Walkways и подборками по настроению"></a>
+  <a href="assets/readme/android-player.webp"><img src="assets/readme/android-player.webp" width="30%" alt="Android. Развёрнутый плеер с обложкой All For You, оценками и таймером сна"></a>
+  <a href="assets/readme/android-album-download.webp"><img src="assets/readme/android-album-download.webp" width="30%" alt="Android. Альбом Renaissance с индикатором загрузки рядом с кнопкой воспроизведения"></a>
 </p>
 
-**«Моя волна».** Выберите настроение на главной или запустите персональную подборку. На Android очередь пополняется по мере прослушивания. Сердечком можно отметить удачную находку прямо в плеере или в шторке Android.
+**Android.** Главная, плеер и загрузка альбома. Нажмите на снимок, чтобы рассмотреть экран.
 
-**Своя библиотека.** Ищите запись по треку, исполнителю или альбому. Откройте карточку артиста, чтобы перейти к дискографии. В блоке «Новинки для вас» появляются релизы знакомых исполнителей. Для треков из каталога доступно скачивание на устройство.
+<p align="center"><a href="assets/readme/mac-library.webp"><img src="assets/readme/mac-library.webp" width="740" alt="Mac Community. Библиотека с импортом файлов и папок, поиском и панелью текущего трека"></a></p>
 
-**Плеер.** Откройте обложку, чтобы развернуть плеер, посмотреть очередь, включить повтор или поставить таймер сна. Плеер учитывает оформление записи, а при отсутствии обложки показывает иллюстрацию.
+**Mac Community.** Библиотека и управление воспроизведением в одном окне.
+
+## Возможности
 
 <a id="start"></a>
 
-### Локальная музыка и плейлисты на двух платформах
+### Библиотека и плеер
 
-На Android откройте **Моя музыка → Добавить локальный трек**. На Mac выберите в библиотеке **Добавить музыку** и укажите файлы или папку. AutPlay создаст управляемые копии и сохранит оригиналы.
-
-<a href="assets/readme/mac-library.webp"><img src="assets/readme/mac-library.webp" width="640" alt="Библиотека Mac Community с импортом файлов, поиском и панелью проигрываемого трека"></a>
-
-Плейлист можно передать файлом `.autplaylist`. При импорте видны состав и порядок записей. Для прослушивания получателю нужен доступ к самим трекам. С личным сервером плейлистом можно поделиться по ссылке.
-
-Для установки нужны Android 8.0+ или Mac с Apple Silicon и macOS 13+. Mac Community подписан сертификатом проекта. Порядок первого запуска и проверки загруженных файлов приведён в [руководстве по установке][guide].
+- **Локальная музыка.** На Android откройте **Моя музыка → Добавить локальный трек**. На Mac выберите **Добавить музыку** или перетащите файлы и папки в библиотеку. Mac сохраняет оригиналы и создаёт копии для плеера.
+- **Очередь и управление.** Доступны очередь, повтор, перемешивание и таймер сна. На Android можно перемотать трек прямо с главной, оценить его в уведомлении и вернуться к сохранённой позиции после перезапуска.
+- **Моя волна.** Выбирайте настроение, отмечайте любимые записи и пропускайте неподходящие. Android пополняет очередь по мере прослушивания. На Mac доступна локальная волна, а подключённый аккаунт может получать подборки Sona.
+- **Личная медиатека.** Ищите треки, альбомы и исполнителей, собирайте плейлисты, просматривайте историю. На Android доступны редактирование метаданных и обложек, статистика прослушиваний, настройки звука, светлая и тёмная темы.
+- **Перенос плейлистов.** Файл `.autplaylist` сохраняет порядок записей между Android и Mac. Перед добавлением можно проверить состав. Для воспроизведения получателю нужен доступ к самим трекам.
 
 <a id="server"></a>
 
-### Личный сервер Sona
+### Каталог, импорт и офлайн-загрузки с Sona
 
-- <a id="account"></a>**Один аккаунт на нескольких устройствах.** Создайте аккаунт на Android и сохраните файл восстановления. После входа на Mac можно синхронизировать историю, предпочтения и плейлисты. Скачанные аудиофайлы хранятся отдельно на каждом устройстве. [Подключение аккаунта][accounts]
-- <a id="rooms"></a>**Комнаты на Android.** Ведущий запускает общую очередь для группы до восьми устройств. Участникам нужен доступ к выбранной музыке. [Устройство комнат][rooms]
-- **Каталог и архив Vault.** Сервер уточняет названия, версии записей, авторство и обложки. Music Preservation Watcher проверяет отслеживаемые релизы по расписанию. Найденный материал можно передать в Vault при подтверждённых правах и совпадении записи. [Источники и разрешения][vault]
+- **Исполнители и релизы.** Из карточки артиста можно перейти к дискографии и совместным записям. «Новинки для вас» показывает релизы знакомых исполнителей.
+- **Трек-листы альбомов.** Откройте издание, чтобы посмотреть диски, порядок треков и доступность записей в вашем Vault. При нескольких совпадениях можно выбрать издание MusicBrainz или Discogs.
+- **Импорт по ссылке.** Поддерживаются Яндекс Музыка, Spotify и SoundCloud. Перед сохранением видны состав коллекции и доступные записи. Для каждого источника действуют свои условия доступа. [Возможности источников][import]
+- **Загрузки на устройство.** Сохраните доступную музыку из каталога для прослушивания без сети. На Android виден ход загрузки трека или коллекции. Если скачалась только часть плейлиста, можно повторить загрузку.
+- **Хранилище Vault.** Sona выдаёт доступные аккаунту аудиофайлы и потоки. Владелец сервера может управлять заданиями и обновлять отображаемые названия через Web Admin. Music Preservation Watcher проверяет отслеживаемые релизы по расписанию. [Хранилище и источники][vault]
 
-## Что дальше
+<a id="account"></a>
 
-- **Комнаты на Mac.** Для подключения настольного клиента предстоит проверить синхронизацию часов и воспроизведения с Android. [План функций Mac Community][mac-plan]
-- **Персональные рекомендации Sona.** Следующий этап обучения требует накопить реальные показы и завершённые прослушивания, а также получить векторные представления аудио. [Состояние работы с рекомендациями][sona-model]
+### Аккаунт и совместное прослушивание
+
+- **Один аккаунт на разных устройствах.** Синхронизируйте историю, предпочтения и плейлисты. При первом подключении можно перенести любимые треки и выбрать исполнителей для стартовой волны. На Android доступны привязка телефона по QR и восстановление доступа с помощью сохранённого файла или кода. [Подключение и восстановление][accounts]
+- **Друзья и приватность на Android.** Находите друзей по публичному ID, управляйте запросами, приглашениями и видимостью статистики.
+- <a id="rooms"></a>**Комнаты на Android.** Ведущий собирает общую очередь и управляет воспроизведением на группе до восьми устройств. Можно пригласить гостя или вернуться в комнату после обрыва связи. Каждому участнику нужен доступ к выбранной записи. [Как работают комнаты][rooms]
+
+## В планах
+
+| Направление | Что предстоит сделать |
+| --- | --- |
+| Совместное прослушивание на Mac | Подключить Mac к комнатам и проверить на устройствах синхронный старт, паузу и восстановление связи с Android. [План Mac Community][mac-plan] |
+| Рекомендации Sona | Подготовить следующий этап обучения на реальных показах, завершённых прослушиваниях и признаках аудиозаписей. [Состояние системы рекомендаций][sona-model] |
 
 <a id="developers"></a>
 
 ## Разработчикам
 
-| Часть проекта | Где искать |
+| Компонент | Технологии и точки входа |
 | --- | --- |
-| Android-приложение, экраны Compose, Media3 и локальное хранилище Room | [apps/android](apps/android) |
-| Mac Community, Compose Desktop и воспроизведение через AVFoundation | [apps/desktop](apps/desktop) · [Сборка и ограничения][mac] |
-| Общие Kotlin-модули клиентов | [shared](shared) |
-| API Sona, фоновые задания, модели данных и миграции PostgreSQL | [server](server) · [Контракт HTTP API][api] |
-| Вычисления и обучение рекомендаций | [gpu](gpu) · [gpu/training](gpu/training) |
-| Получение музыки, архив и нормализация метаданных | [tools/local_music_acquisition](tools/local_music_acquisition) · [Обработчик метаданных][metadata] |
-| Развёртывание, обновление и восстановление сервера | [deploy](deploy) · [Руководство оператора][deployment] · [Резервные копии][backup] |
+| Android | Kotlin, Jetpack Compose, Media3, Room и WorkManager. [Приложение](apps/android) · [Воспроизведение](docs/development/PLAYBACK_TRANSITIONS.md) |
+| Mac Community | Kotlin, Compose Desktop и AVFoundation. [Клиент](apps/desktop) · [Общие модули](shared) · [Сборка и подпись](docs/operations/MACOS_COMMUNITY.md) |
+| Sona | Python, PostgreSQL и файловое хранилище Vault. [Сервер](server) · [Контракты API](contracts/openapi/v1) · [Фоновые обработчики](docs/operations/METADATA_WORKER.md) |
+| Обработка музыки | [Поиск и получение записей](tools/local_music_acquisition) · [Вычисления и обучение](gpu) |
 
-### Подготовка окружения
-
-Понадобятся Git, uv, JDK 17 и Android SDK для Android. Полная серверная проверка использует Docker, PostgreSQL с pgvector и FFmpeg. Версии и пути для `JAVA_HOME` и `ANDROID_HOME` перечислены в [руководстве по настройке][setup].
+Из корня репозитория на Windows можно собрать QA-версию Android и запустить модульные тесты. Она устанавливается рядом с обычным приложением.
 
 ```powershell
-# Windows, из корня репозитория
 .\scripts\bootstrap.ps1
-.\gradlew.bat --dependency-verification=strict -Pautplay.qaSideBySide=true :apps:android:assembleDebug
-.\gradlew.bat --dependency-verification=strict :apps:android:testDebugUnitTest
+.\gradlew.bat --max-workers=1 --dependency-verification=strict -Pautplay.qaSideBySide=true :apps:android:assembleDebug
+.\gradlew.bat --max-workers=1 --dependency-verification=strict :apps:android:testDebugUnitTest
 ```
 
-```bash
-# Linux или macOS, из корня репозитория
-bash scripts/bootstrap.sh
-# Серверные тесты
-(cd server && uv run --frozen pytest -q)
-# Нативные проверки настольного клиента на Mac
-bash scripts/check-desktop.sh
-```
+Для серверных проверок на Linux выполните `bash scripts/bootstrap.sh --server-only`, затем `bash scripts/check.sh --server-only`. Для нативных проверок на Mac используйте `bash scripts/check-desktop.sh`.
 
-QA-сборка Android использует идентификатор `app.autplay.qa` и устанавливается рядом с обычным приложением. Для полной проверки используйте `scripts/check.ps1` или `scripts/check.sh`. Порядок запуска временной базы, интеграционных и инструментальных тестов описан в руководстве разработчика. [Настройка и проверки][setup]
+[Настройка окружения](docs/operations/FULL_PROJECT_SETUP.md) · [Архитектура](docs/design/AutPlay%20System%20Architecture%20v1.md) · [Развёртывание Sona](docs/operations/DEPLOYMENT.md) · [Резервные копии](docs/operations/BACKUP_RESTORE.md) · [CI и выпуск](docs/operations/CI_RELEASE.md) · [Сообщить об ошибке](https://github.com/Dakstar-cool/AutPlay/issues)
 
-### Контракты и выпуск
-
-Изменения API сверяйте с OpenAPI, изменения хранилищ — с миграциями. Для проверки совместимости аккаунтов и синхронизации используйте документацию протоколов. Выпуск включает подписанный APK, DMG Mac Community и отдельно обозначенный архив серверного Docker-образа для Linux x86-64. GitHub формирует архивы исходников из тега.
-
-[Архитектура][architecture] · [Переносимые аккаунты][portable] · [Переходы между треками][transitions] · [CI и порядок выпуска][ci] · [Сообщить об ошибке][issues]
-
-[downloads]: https://github.com/Dakstar-cool/AutPlay/releases/latest
-[guide]: docs/operations/GET_STARTED_1.0.16.md
-[notes]: docs/release/RELEASE_NOTES_1.0.16.md
-[accounts]: docs/operations/GET_STARTED_1.0.16.md#account
+[apk]: https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.17/autplay-1.0.17-production.apk
+[dmg]: https://github.com/Dakstar-cool/AutPlay/releases/download/v1.0.17/autplay-1.0.17-macos-arm64.dmg
+[guide]: docs/operations/GET_STARTED_1.0.17.md
+[notes]: docs/release/RELEASE_NOTES_1.0.17.md
+[import]: docs/operations/EXTERNAL_MUSIC_IMPORT.md
+[accounts]: docs/operations/GET_STARTED_1.0.17.md#account
 [rooms]: docs/development/WAVE_ROOMS.md
 [vault]: tools/ACQUISITION_VAULT_BRIDGE.md#music-preservation-watcher
 [mac-plan]: docs/operations/MACOS_FEATURE_MATRIX.md
 [sona-model]: docs/operations/SONA_OWNER_RECOMMENDATIONS.md
-[mac]: docs/operations/MACOS_COMMUNITY.md
-[api]: contracts/openapi/v1/autplay-wave.openapi.json
-[metadata]: docs/operations/METADATA_WORKER.md
-[deployment]: docs/operations/DEPLOYMENT.md
-[backup]: docs/operations/BACKUP_RESTORE.md
-[setup]: docs/operations/FULL_PROJECT_SETUP.md
-[architecture]: docs/design/AutPlay%20System%20Architecture%20v1.md
-[portable]: docs/operations/PORTABLE_ACCOUNTS.md
-[transitions]: docs/development/PLAYBACK_TRANSITIONS.md
-[ci]: docs/operations/CI_RELEASE.md
-[issues]: https://github.com/Dakstar-cool/AutPlay/issues

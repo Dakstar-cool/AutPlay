@@ -1190,6 +1190,11 @@ class PostgresImportRepository:
                                 (recording.title, recording.version_text, recording.recording_kind),
                             )
                         )
+                    )
+                    + (
+                        ()
+                        if recording.explicit is None
+                        else ("EXPLICIT" if recording.explicit else "CLEAN",)
                     ),
                     identifiers=identifiers[recording.recording_id],
                     fingerprint=fingerprint_by_recording.get(recording.recording_id),
@@ -1374,6 +1379,20 @@ def _append_resolved_user_track_lineage(
         )
         .with_for_update()
     )
+    if user_ref is None and entry.user_track_ref_id is not None:
+        # Confirm the same private handle that already backs this occurrence and its like.
+        user_ref = session.scalar(
+            select(UserTrackRefRow)
+            .where(
+                UserTrackRefRow.user_track_ref_id == entry.user_track_ref_id,
+                UserTrackRefRow.user_id == actor_user_id,
+                UserTrackRefRow.deleted_at.is_(None),
+                UserTrackRefRow.recording_id.is_(None),
+            )
+            .with_for_update()
+        )
+        if user_ref is None:
+            raise ImportReviewConflictError
     if user_ref is None:
         user_ref = UserTrackRefRow(
             user_id=actor_user_id,

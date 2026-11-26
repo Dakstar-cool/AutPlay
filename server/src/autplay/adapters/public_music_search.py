@@ -364,6 +364,8 @@ class MusicBrainzDiscoveryProvider:
                 len(page),
                 edition_items=tuple(item[2] for item in ordered),
                 max_offset=MAX_BROWSE_OFFSET,
+                edition_title=_text(document.get("title")),
+                edition_artist=_credit(document.get("artist-credit")),
             )
         except (ValueError, TypeError, KeyError, AttributeError) as error:
             raise MetadataProviderError("metadata_response_invalid", retryable=False) from error

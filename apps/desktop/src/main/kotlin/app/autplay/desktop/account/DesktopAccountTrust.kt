@@ -41,7 +41,7 @@ public object DesktopAccountTrust {
                 payload.string("stream_origin") == transport.stream.toASCIIString(), AccountControlFailure.TRUST_REQUIRED)
             val majors = payload.array("supported_api_majors")
             controlRequire(majors.size in 1..8 && majors.distinct().size == majors.size && JsonPrimitive(1) in majors)
-            controlRequire(payload.boolean("enrollment_protocol_available"), AccountControlFailure.UNSUPPORTED)
+            controlRequire(payload.boolean("enrollment_protocol_available"), AccountControlFailure.SERVER_CONNECTION_UNSUPPORTED)
             display(payload.string("label_hint"), 80); fresh(payload, now, 600)
             return D1.TrustedM5Identity(expectedInstance, expectedEpoch, expectedSpki,
                 secureSha256(expectedSpki), payload.string("api_origin"), payload.string("stream_origin"))

@@ -63,12 +63,12 @@ internal object PlaybackNotification {
                 .setDisplayName(context.getString(R.string.player_previous_track))
                 .setSlots(CommandButton.SLOT_BACK)
                 .build(),
-            button(ACTION_LIKE, if (preference == "LIKED") CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED,
-                if (preference == "LIKED") R.drawable.ic_autplay_favorite_filled else R.drawable.ic_autplay_favorite,
-                R.string.action_like),
             button(ACTION_DISLIKE, CommandButton.ICON_UNDEFINED,
                 if (preference == "DISLIKED") R.drawable.ic_autplay_heart_off_filled else R.drawable.ic_autplay_heart_off,
                 R.string.action_dislike),
+            button(ACTION_LIKE, if (preference == "LIKED") CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED,
+                if (preference == "LIKED") R.drawable.ic_autplay_favorite_filled else R.drawable.ic_autplay_favorite,
+                R.string.action_like),
         )
     }
 }

@@ -14,7 +14,6 @@ from autplay.domain.catalog_artwork import (
     ArtMatch,
     album_label,
     artwork_search_title,
-    artwork_title,
     label,
     native_image_host,
     recording_labels_match,
@@ -22,11 +21,13 @@ from autplay.domain.catalog_artwork import (
     timing_limit,
     versioned_titles,
 )
+from autplay.domain.track_names import strip_source_site
 
 BANDCAMP_SEARCH = "https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic"
 
 
 def yandex_search_url(artist: str, title: str = "", *, clean_title: bool = True) -> str:
+    artist = strip_source_site(artist)
     if clean_title:
         title = artwork_search_title(title, artist)
     return "https://api.music.yandex.net/search?" + urlencode(
@@ -96,16 +97,15 @@ def _credit_matches(
     artist: str, title: str, performers: Iterable[dict[str, Any]], full_title: str
 ) -> bool:
     names = [label(p.get("name") or "") for p in performers]
-    if not all(names):
+    artist = strip_source_site(artist)
+    if not names or not all(names):
         return False
     if len(names) == 1:
         return recording_labels_match(label(artist), label(title), names[0], label(full_title))
-    if label(artwork_title(title, artist)) != label(artwork_title(full_title, artist)):
-        return False
-    return label(artist) in {
-        sep.join(names)
+    return any(
+        recording_labels_match(label(artist), label(title), sep.join(names), label(full_title))
         for sep in (", ", " & ", "/", " / ", " feat. ", " feat ", " ft. ", " x ", " и ")
-    }
+    )
 
 
 def yandex_match(
@@ -231,6 +231,7 @@ def yandex_editions(
 
 
 def bandcamp_query(artist: str, title: str) -> bytes:
+    artist = strip_source_site(artist)
     return json.dumps(
         {
             "search_text": f"{artist} {artwork_search_title(title, artist)}",

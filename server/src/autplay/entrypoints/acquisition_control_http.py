@@ -269,9 +269,10 @@ def create_acquisition_control_router(
                 yt_dlp_concurrency=int(form["yt_dlp_concurrency"]),
                 soundcloud_concurrency=int(form["soundcloud_concurrency"]),
             )
-            return apply_admin_security_headers(
-                RedirectResponse("/admin/acquisition?submitted=1", status_code=303)
-            )
+            target = "/admin/acquisition?submitted=1"
+            if "lang" in request.query_params:
+                target += f"&lang={locale(request)}"
+            return apply_admin_security_headers(RedirectResponse(target, status_code=303))
         except ValueError, TypeError, KeyError, WebAdminError:
             return problem(request, "acquisition_input_invalid")
 

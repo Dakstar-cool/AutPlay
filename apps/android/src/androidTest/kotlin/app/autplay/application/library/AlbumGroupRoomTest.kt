@@ -82,6 +82,8 @@ class AlbumGroupRoomTest {
             val core = CoreProductRepository(db)
             assertEquals(first.group.stableId, core.releases(profile).first().single().stableId)
             val detail = core.releaseDetail(first.group.stableId, profile)!!
+            assertEquals("one", second.artworkTrackId)
+            assertEquals("one", detail.artworkTrackId)
             assertNull(detail.serverReleaseId)
             assertEquals(listOf("one", "two"), detail.tracks.map { it.localUserTrackRefId })
             assertTrue(detail.tracks.all { it.localRecordingId == null })

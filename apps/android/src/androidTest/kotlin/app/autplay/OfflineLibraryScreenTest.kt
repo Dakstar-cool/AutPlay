@@ -434,7 +434,8 @@ class OfflineLibraryScreenTest {
         composeRule.onNodeWithTag("home-add-first-track").assertIsDisplayed()
         val home = composeRule.onNodeWithTag("home-product-list").fetchSemanticsNode()
         val indexOf = home.config[SemanticsProperties.IndexForKey]
-        for (key in listOf("home:new-releases", "home:recent-heading", "home:recommendations-heading",
+        org.junit.Assert.assertTrue(indexOf("home:new-releases") >= 0)
+        for (key in listOf("home:recent-heading", "home:recommendations-heading",
                 "home:playlists-heading", "home:offline-heading", "home:contexts-heading")) {
             org.junit.Assert.assertEquals(key, -1, indexOf(key))
         }
@@ -567,7 +568,7 @@ class OfflineLibraryScreenTest {
     }
 
     @Test
-    fun libraryBrowsesAlbumAndPlaylistGridsWithPersistentShortcuts() = runBlocking {
+    fun libraryBrowsesAlbumAndPlaylistGridsWithPersistentShortcuts(): Unit = runBlocking {
         val language = AppLanguage.Russian
         applicationNonSecretSettingsStore(context).mutate { it.copy(appLanguage = language.storedValue) }
         val strings = localizedAppContext(context, language)
@@ -632,6 +633,16 @@ class OfflineLibraryScreenTest {
             androidx.test.espresso.Espresso.pressBack()
             composeRule.onNodeWithTag("library-product-list").assertIsDisplayed()
         }
+        composeRule.onNodeWithTag("personal-library-search").performTextInput("Morning")
+        composeRule.onNodeWithText("Morning Walk").performClick()
+        composeRule.onNodeWithTag("collection-details").assertIsDisplayed()
+        waitForNavigation(strings.getString(R.string.nav_library)).performClick()
+        composeRule.onNodeWithTag("library-tab-Tracks").assert(isSelected())
+        composeRule.onNodeWithTag("library-track-$TRACK").assertIsDisplayed()
+        composeRule.onNodeWithTag("library-favorites").performClick()
+        composeRule.onNodeWithTag("personal-library-search").performTextInput("unmatched")
+        waitForNavigation(strings.getString(R.string.nav_library)).performClick()
+        composeRule.onNodeWithTag("library-track-$TRACK").assertIsDisplayed()
     }
 
     @Test
@@ -737,11 +748,12 @@ class OfflineLibraryScreenTest {
             tag(tile).performClick()
             awaitTag("collection-listen")
         }
-        fun checkCover() {
+        fun checkCover(node: String = "collection-artwork") {
             composeRule.waitUntil(10_000) {
-                val pixels = tag("collection-artwork").captureToImage().toPixelMap()
-                val sun = pixels[pixels.width / 2, pixels.height / 2]
-                val sea = pixels[pixels.width / 2, pixels.height * 9 / 10]
+                val pixels = tag(node).captureToImage().toPixelMap()
+                val side = minOf(pixels.width, pixels.height)
+                val sun = pixels[pixels.width / 2, side / 2]
+                val sea = pixels[pixels.width / 2, side * 9 / 10]
                 sun.red > .9f && sun.green > .55f && sun.blue < .5f && sea.blue > sea.red
             }
         }
@@ -765,6 +777,7 @@ class OfflineLibraryScreenTest {
         tag("collection-open-artist").performClick()
         awaitTag("artist-header")
         tag("collection-details").performScrollToNode(hasTestTag("artist-album-${pages.serverAlbum}"))
+        checkCover("artist-album-${pages.serverAlbum}")
         back()
         awaitTag("collection-listen")
         tag("collection-listen").performClick()
@@ -1187,9 +1200,9 @@ class OfflineLibraryScreenTest {
         Unit
     }
 
-    private fun waitForNavigation(label: String) = composeRule.onNode(hasText(label) and hasClickAction()).also {
+    private fun waitForNavigation(label: String) = composeRule.onNodeWithContentDescription(label).also {
         composeRule.waitUntil(timeoutMillis = 10_000) {
-            composeRule.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithContentDescription(label).fetchSemanticsNodes().isNotEmpty()
         }
     }
 
@@ -1258,7 +1271,8 @@ class OfflineLibraryScreenTest {
         return titles.mapIndexed { i, title ->
             val id = LocalId.random().value
             database.catalogProjectionDao().upsertReleases(listOf(ReleaseProjectionEntity(
-                id, null, null, title, "AutPlay test", null, "ALBUM", null, 1, i.toLong(), false)))
+                id, null, null, title, "AutPlay test", "2020-03-%02d".format(java.util.Locale.ROOT, i + 1),
+                "ALBUM", null, 1, (titles.size - i).toLong(), false)))
             database.catalogProjectionDao().upsertReleaseTracks(listOf(ReleaseTrackProjectionEntity(
                 LocalId.random().value, null, id, recordingId, 1, 1, null, "Offline sample", "AutPlay test", null)))
             id to title

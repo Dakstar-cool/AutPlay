@@ -91,6 +91,7 @@ internal fun buildCoreCommandActions(
     myWaveScope: CoroutineScope,
     personalWaveQueue: PersonalWaveQueue,
     fetchWave: suspend (ClientEventBinding, PersonalWaveSession) -> ServerRecommendationResult,
+    preparingDownload: (String, Boolean) -> Unit = { _, _ -> },
 ): CoreCommandActions {
     fun recommendationFor(key: String): Pair<String, HomeRecommendationItem>? {
         val feed = activeHomeFeed() ?: return null
@@ -424,6 +425,7 @@ internal fun buildCoreCommandActions(
             val activeBinding = binding() ?: return@download
             val actionKey = "download:$trackRefId"
             if (!actionGate.begin(actionKey)) return@download
+            preparingDownload(trackRefId, true)
             scope.launch {
                 try {
                     runCatching {
@@ -435,6 +437,7 @@ internal fun buildCoreCommandActions(
                         )
                     }.onFailure { reportError("DOWNLOAD_UNAVAILABLE") }
                 } finally {
+                    preparingDownload(trackRefId, false)
                     actionGate.complete(actionKey)
                 }
             }

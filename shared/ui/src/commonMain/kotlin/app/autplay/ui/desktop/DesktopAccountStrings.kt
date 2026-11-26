@@ -1,6 +1,11 @@
 package app.autplay.ui.desktop
 
 internal enum class DesktopAccountText(val ru: String, val en: String) {
+    AddressStep("1 из 3 · Адрес сервера", "1 of 3 · Server address"),
+    TrustStep("2 из 3 · Подтверждение сервера", "2 of 3 · Confirm server"),
+    SignInStep("3 из 3 · Вход в аккаунт", "3 of 3 · Sign in"),
+    Connected("Аккаунт подключён", "Account connected"),
+    RegisterLocalAccount("Регистрация локального аккаунта на сервере", "Register local account on the server"),
     Workspace("Аккаунт и ваша музыка", "Account and your music"),
     Portable("Переносимый аккаунт", "Portable account"),
     Login("Вход по ID и паролю", "Log in with ID and password"),
@@ -47,7 +52,6 @@ internal enum class DesktopAccountText(val ru: String, val en: String) {
     SystemTrust("Системная проверка сертификата", "System certificate verification"),
     VerifyApi("Я проверил адрес API и его TLS", "I checked the API origin and its TLS"),
     VerifyStream("Я проверил адрес медиасервера и его TLS", "I checked the streaming origin and its TLS"),
-    VerifyIdentity("Я проверил идентичность сервера", "I checked the server identity"),
     LocalReview("Локальные данные перед подключением", "Local data before connecting"),
     LocalReviewHelp("Выберите только те изменения, которые хотите связать с показанным аккаунтом. Остальные остаются локальными. Названия не меняют владельца данных.", "Select only the changes to connect to the displayed account. Other data stays local. Labels do not change data ownership."),
     MoreLocal("Показана одна страница. Для остальных данных откройте следующую страницу проверки через владельца подключения.", "This is one page. Request the next review page from the connection owner for remaining data."),
@@ -153,7 +157,7 @@ internal fun desktopAccountActionText(action: DesktopAccountAction, language: De
         DesktopAccountAction.Discover -> "Найти сервер" to "Discover server"
         DesktopAccountAction.ChooseQrFile -> "Выбрать файл или QR-изображение" to "Choose file or QR image"
         DesktopAccountAction.SubmitQr -> "Прочитать код" to "Read code"
-        DesktopAccountAction.ConfirmTransport -> "Подтвердить этот сервер" to "Confirm this server"
+        DesktopAccountAction.ConfirmTransport -> "Доверять указанным адресам и ключу сервера" to "Trust these addresses and server key"
         DesktopAccountAction.PreparePinnedTransport -> "Проверить TLS-политику" to "Review TLS policy"
         DesktopAccountAction.ConfirmPinnedTransport -> "Подтвердить TLS и прочитать discovery" to "Confirm TLS and read discovery"
         DesktopAccountAction.SubmitInvitation -> "Проверить приглашение" to "Review invitation"
@@ -163,7 +167,7 @@ internal fun desktopAccountActionText(action: DesktopAccountAction, language: De
         DesktopAccountAction.ConfirmAdmission -> "Подключиться к показанному аккаунту" to "Connect to displayed account"
         DesktopAccountAction.EnrollTrusted -> "Подключить доверенное устройство заново" to "Reenroll trusted device"
         DesktopAccountAction.ConfirmTrusted -> "Подтвердить повторное подключение" to "Confirm reenrollment"
-        DesktopAccountAction.Bind -> "Подключить этот аккаунт" to "Bind this account"
+        DesktopAccountAction.Bind -> "Синхронизировать" to "Sync now"
         DesktopAccountAction.KeepLocal -> "Оставить только на этом устройстве" to "Keep only on this device"
         DesktopAccountAction.ReviewLocal -> "Проверить локальные изменения" to "Review local changes"
         DesktopAccountAction.ConnectSelected -> "Связать выбранные изменения" to "Connect selected changes"
@@ -249,7 +253,13 @@ internal fun desktopAccountIssueText(issue: DesktopAccountIssue, language: Deskt
         DesktopAccountIssue.Conflict -> "Данные изменились. Обновите и подтвердите новый результат." to "Data changed. Refresh and confirm the new result."
         DesktopAccountIssue.ExportExists -> "Файл существует. Выберите другое место." to "The file exists. Choose another destination."
         DesktopAccountIssue.ExportReadback -> "Сохранение ещё не подтверждено повторным чтением." to "Saving has not been confirmed by readback yet."
-        DesktopAccountIssue.Unsupported -> "Требуется поддерживаемое устройство или совместимый сервер." to "A supported device or compatible server is required."
+        DesktopAccountIssue.Unsupported -> "Это действие недоступно." to "This action is unavailable."
+        DesktopAccountIssue.ServerConnectionUnsupported -> "Сервер по этому адресу не предлагает подключение для Mac. Проверьте адрес и поддержку macOS в настройках сервера." to
+            "This server does not offer Mac connections at this address. Check the address and the server’s macOS support settings."
+        DesktopAccountIssue.InvalidServerResponse -> "Не удалось прочитать ответ сервера. Проверьте адрес и версию сервера." to
+            "The server response could not be read. Check the server address and version."
+        DesktopAccountIssue.LocalIdentityUnavailable -> "AutPlay не удалось открыть защищённое хранилище аккаунта на этом Mac. Откройте аккаунты заново из установленного приложения." to
+            "AutPlay could not open protected account storage on this Mac. Reopen accounts from the installed app."
         DesktopAccountIssue.Storage -> "Данные недоступны. Сохранённое состояние не удалено; устраните проблему хранения." to "Data is unavailable. Saved state has not been deleted; resolve the storage problem."
         DesktopAccountIssue.CancelPending -> "Отмена запрошена; ожидается завершение уже начатой операции." to "Cancellation requested; waiting for an operation already in progress to settle."
     }

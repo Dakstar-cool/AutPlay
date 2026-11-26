@@ -305,6 +305,7 @@ def test_artist_download_pages_studio_recordings_before_idempotent_start(
         discovery = Mock(spec_set=MusicDiscoveryService(lambda _: pytest.fail("Unexpected HTTP")))
         discovery.page_cache = None
         discovery.artist_tracks.side_effect = fixture.artist_tracks
+        discovery.official_recordings.return_value = {str(shared)}
         discovery.release_tracks.side_effect = fixture.release_tracks
         return CatalogDownloads(
             admission.sessions,
@@ -333,7 +334,10 @@ def test_artist_download_pages_studio_recordings_before_idempotent_start(
         assert session.scalar(select(func.count()).select_from(InternetAcquisitionRow)) == 0
     for _ in range(2):
         assert service().command(actor, operation, "start")["phase"] == "downloading"
-    service().command(actor, operation, "advance")
+    assert service().command(actor, operation, "advance")["counts"]["queued"] == 1
+    with admission.sessions() as session:
+        selected = session.scalars(select(InternetAcquisitionRow)).one()
+        assert selected.selected_snapshot["title"] == "Track 0"
     assert service().command(actor, operation, "advance")["counts"]["queued"] == 2
     repeated = uuid4()
     service().preview(actor, repeated, "release", edition, False)
@@ -717,7 +721,7 @@ def test_migration_preserves_old_snapshot_and_refuses_receipt_loss(
             (search_id, owner, b"r" * 32),
         )
         head_before = conn.execute("SELECT version_num FROM alembic_version").fetchone()
-        assert head_before == ("0079_music_preservation",)
+        assert head_before == ("0081_artist_onboarding",)
         purge_before = conn.execute(
             "SELECT pg_get_functiondef('account.purge_account(uuid,uuid)'::regprocedure)"
         ).fetchone()

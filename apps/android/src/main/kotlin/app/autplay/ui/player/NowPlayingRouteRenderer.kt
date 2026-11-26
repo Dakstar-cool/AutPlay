@@ -70,6 +70,7 @@ internal fun NowPlayingRouteRenderer(
     onPrevious: () -> Unit = actions.previous,
     onNext: () -> Unit = actions.next,
     serverConnection: PlayerServerConnection = PlayerServerConnection.Offline,
+    transferId: String? = null,
 ) {
     val network = LocalContext.current.getSystemService(android.net.ConnectivityManager::class.java)
     val online by remember(network) { app.autplay.networkAvailability(network) }
@@ -129,6 +130,7 @@ internal fun NowPlayingRouteRenderer(
         queueActions = actions.queue,
         onDownload = actions.download,
         downloadState = downloadState,
+        transferId = transferId,
         serverConnection = if (online) serverConnection else PlayerServerConnection.Offline,
         modifier = modifier,
     )

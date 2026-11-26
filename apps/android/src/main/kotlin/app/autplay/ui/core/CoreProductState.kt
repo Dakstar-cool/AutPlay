@@ -122,7 +122,8 @@ public enum class DetailKind {
 }
 
 /** The id must be an identifier owned by an existing application projection, never display text. */
-public data class DetailTarget(public val kind: DetailKind, public val stableId: String, public val label: String? = null)
+public data class DetailTarget(public val kind: DetailKind, public val stableId: String, public val label: String? = null,
+    public val albumArtist: String? = null)
 
 /** Stable row identity and viewport offset used to restore a list after its data reloads. */
 public data class ListAnchor(

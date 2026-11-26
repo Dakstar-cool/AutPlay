@@ -1,0 +1,32 @@
+<resources>
+    <string name="ext_import">Импорт по ссылке</string>
+    <string name="ext_favorites">Перенести любимые</string>
+    <string name="ext_new_copy">Создать ещё одну копию</string>
+    <string name="ext_link">Ссылка на альбом, плейлист или любимые</string>
+    <string name="ext_recent">Недавние импорты</string>
+    <string name="ext_album">Альбом</string>
+    <string name="ext_playlist">Личный плейлист</string>
+    <string name="ext_counts">Получено %1$d из %2$s · Определено %3$d · Доступно аудио %4$d</string>
+    <string name="ext_sets">Понравившиеся сеты: %1$d из %2$s</string>
+    <string name="ext_marks">Отметок в источнике: %1$d</string>
+    <string name="ext_partial">Источник вернул неполную коллекцию.</string>
+    <string name="ext_session">Предпросмотр SoundCloud доступен до закрытия окна.</string>
+    <string name="ext_connect">Подключить Spotify</string>
+    <string name="ext_saved">Сохранено в аккаунте</string>
+    <string name="ext_unknown">Недоступный трек</string>
+    <string name="ext_failed">Не удалось завершить импорт. Проверьте ссылку, соединение и доступ к источнику.</string>
+    <string name="ext_save">Сохранить</string>
+    <string name="ext_continue">Продолжить</string>
+    <string name="ext_close">Закрыть</string>
+    <string name="ext_catalog_selection">Сохранить из каталога (%1$d)</string>
+    <string name="ext_not_configured">На сервере AutPlay ещё не настроен доступ к этому сервису.</string>
+    <string name="ext_choose_favorites">Для ссылки на лайки выберите «Перенести любимые».</string>
+    <string name="ext_access">Проверьте доступ к коллекции в исходном аккаунте.</string>
+    <string name="ext_rate">Сервис ограничил частоту запросов. Попробуйте позже.</string>
+    <string name="ext_no_album">Это издание ещё не найдено в каталоге AutPlay.</string>
+    <string name="ext_missing">Исчезло из источника: %1$d. Сохранено в вашей библиотеке.</string>
+    <string name="ext_cancelled">Импорт отменён</string>
+    <string name="ext_previous">Назад</string>
+    <string name="ext_more">Ещё треки</string>
+    <string name="ext_cancel">Отменить импорт</string>
+</resources>

@@ -494,9 +494,6 @@ class M3VisualEvidenceActivity : ComponentActivity() {
                                         recentlyPlayed = if (activeScreen == "empty") emptyList() else listOf(
                                             HomeTrackUiItem("recent", "Northern Lights", "Sofia Reed"),
                                         ),
-                                        playlists = if (activeScreen == "empty") emptyList() else listOf(
-                                            CoreCollectionUiItem("playlist", "Evening duplicates", "A local playlist"),
-                                        ),
                                         offlineReady = if (activeScreen == "empty") emptyList() else listOf(
                                             HomeTrackUiItem("offline", "Quiet Signals", "Mara Lin"),
                                         ),

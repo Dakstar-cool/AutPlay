@@ -366,7 +366,10 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
                         if (artist?.identityStatus == "ACTIVE") listOf(artist.copy(name = musicDisplayTitle(name.creditedName)))
                         else orderedPerformers(name.creditedName, linked)
                     }.distinctBy { it.key }
-                    row.copy(performers = performers, guest = row.guest || performers.size > 1)
+                    val provisionalCredit = names[row.creditId?.value].orEmpty()
+                        .filter { byId[it.serverArtistId].orEmpty().size > 1 }.map { it.creditedName }
+                    row.copy(performers = performers, guest = row.guest ||
+                        provisionalCredit.any { hasFeaturedCredit(group.artist.name, it) })
                 }
                 offset += rows.size
             } while (limit == null && rows.size == pageSize)
@@ -376,7 +379,7 @@ class RoomArtistCatalogPort(private val database: AutPlayDatabase) : ArtistCatal
         val extraTracks = group.extraTracks.map { track ->
             ArtistAppearance(null, SUBJECT_RECORDING, track.recordingId?.let(::ServerId), track.title, ArtistLocalTarget.Track(track.trackId),
                 listenCount = plays[track.trackId] ?: 0,
-                guest = byTrack[track.trackId].orEmpty().size > 1, performers = orderedPerformers(track.artist, byTrack[track.trackId].orEmpty()))
+                guest = hasFeaturedCredit(group.artist.name, track.artist, track.title), performers = orderedPerformers(track.artist, byTrack[track.trackId].orEmpty()))
         }
         val merged = (extraTracks.sortedByDescending { it.listenCount } + pages).distinctBy { it.subjectType to it.displayKey }
         return if (limit == null) merged else merged.take(limit)

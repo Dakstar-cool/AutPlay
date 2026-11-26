@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="album_discogs_id">Discogs release link or ID</string>
+    <string name="album_discogs_credit">Data provided by Discogs ↗</string>
+    <string name="album_select_edition">Choose an edition</string>
+    <string name="album_change_edition">Change edition</string>
+    <string name="album_local_tracks">Other tracks in your local collection</string>
+    <string name="album_no_tracklist">Edition tracklist not found</string>
+    <string name="album_catalog_actions">Catalogue actions</string>
+    <string name="album_vault_absent">Not in your available Vault</string>
+    <string name="album_vault_unknown">Vault availability unconfirmed</string>
     <string name="music_download_track">Download track</string>
     <string name="music_saved_offline">Available offline</string>
     <string name="music_downloading">Downloading…</string>
@@ -47,7 +56,7 @@
     <string name="catalog_download_track">Download track</string>
     <string name="catalog_download_device_result">Added to Downloads: %1$d · Unavailable from server: %2$d</string>
     <string name="catalog_download_library_scope">Choose the artist in the catalogue to load their discography.</string>
-    <string name="catalog_download_scope">Includes available recordings credited to this artist, including collaborations. Marked covers and live versions are excluded.</string>
+    <string name="catalog_download_scope">Studio recordings from official releases download first. Collaborations are included. Marked covers and live versions are excluded.</string>
     <string name="catalog_download_vault_complete">Vault download complete</string>
     <string name="catalog_download_counts">In Vault %1$d · Queued %2$d · Available to download %3$d · Unavailable %4$d</string>
     <string name="catalog_download_start">Start download</string>
@@ -60,4 +69,13 @@
     <string name="download_wait_unmetered">Waiting for an unmetered connection</string>
     <string name="download_allow_metered">Allow downloads on metered networks</string>
     <string name="player_find_phone_audio">Find this track on the phone</string>
+    <string name="download_percent">%1$d%%</string>
+    <string name="download_playlist">Download playlist</string>
+    <string name="download_partial">Saved %1$d of %2$d · Retry</string>
+    <string name="download_saved_count">Saved %1$d of %2$d</string>
+    <string name="download_retry_inline">Download failed · Retry</string>
+    <string name="download_bytes_of">%1$s of %2$s</string>
+    <string name="download_catalog_found">Searching the catalog · Tracks found: %1$d</string>
+    <string name="download_catalog_checked">Tracks checked: %1$d of %2$d</string>
+    <string name="download_catalog_processed">Tracks processed: %1$d of %2$d</string>
 </resources>

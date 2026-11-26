@@ -32,6 +32,20 @@ class AutPlayNavigationStateTest {
     }
 
     @Test
+    fun libraryDetailsReturnToTheirOriginAndExplicitLibrarySelectionDropsIt() {
+        for (origin in listOf(UiDestination.Home, UiDestination.Search, UiDestination.Playlists, UiDestination.NowPlaying)) {
+            val state = AutPlayNavigationState(origin, emptyList())
+            state.openLibraryDetail()
+            state.openLibraryDetail()
+            assertTrue(state.navigateBack())
+            assertEquals(origin, state.current)
+            state.openLibraryDetail()
+            state.navigate(UiDestination.Library)
+            assertFalse(state.canNavigateBack)
+        }
+    }
+
+    @Test
     fun saverStoresStableRoutesWithoutPlayerState() {
         val state = AutPlayNavigationState(UiDestination.Search, listOf(UiDestination.Home))
         assertEquals(listOf("home", "search"), state.savedRoutes())

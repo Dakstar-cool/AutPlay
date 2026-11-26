@@ -172,7 +172,7 @@ public fun desktopRuntimeConnectionView(state: DesktopAccountViewState): Desktop
         state.health == DesktopAccountHealth.OFFLINE -> DesktopAccountCondition.Offline
         state.health == DesktopAccountHealth.AUTH_REQUIRED -> DesktopAccountCondition.Attention
         state.phase == DesktopAccountPhase.OUTCOME_PENDING -> DesktopAccountCondition.Pending
-        state.phase == DesktopAccountPhase.CONNECTED -> DesktopAccountCondition.Ready
+        state.phase == DesktopAccountPhase.CONNECTED || state.phase == DesktopAccountPhase.READY -> DesktopAccountCondition.Ready
         state.phase == DesktopAccountPhase.TRUST_REQUIRED -> DesktopAccountCondition.Attention
         state.phase == DesktopAccountPhase.LOCAL -> DesktopAccountCondition.Empty
         else -> DesktopAccountCondition.Unavailable
@@ -183,6 +183,9 @@ public fun desktopRuntimeConnectionView(state: DesktopAccountViewState): Desktop
         AccountControlFailure.EXPIRED -> DesktopAccountIssue.Expired
         AccountControlFailure.CONFLICT, AccountControlFailure.CONTEXT_CHANGED -> DesktopAccountIssue.Conflict
         AccountControlFailure.UNSUPPORTED -> DesktopAccountIssue.Unsupported
+        AccountControlFailure.SERVER_CONNECTION_UNSUPPORTED -> DesktopAccountIssue.ServerConnectionUnsupported
+        AccountControlFailure.INVALID_RESPONSE -> DesktopAccountIssue.InvalidServerResponse
+        AccountControlFailure.LOCAL_IDENTITY_UNAVAILABLE -> DesktopAccountIssue.LocalIdentityUnavailable
         null -> DesktopAccountIssue.None
         else -> DesktopAccountIssue.Retry
     }, accountPublicId = state.publicId, pendingItems = state.pendingCount)

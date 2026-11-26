@@ -79,6 +79,7 @@ class DownloadIntentRepository(
                     artist = names.artist,
                     state = intent.state,
                     failureCode = intent.failureCode,
+                    transferId = intent.media3DownloadId ?: intent.downloadIntentId,
                 )
             }
         }
@@ -403,6 +404,7 @@ data class DownloadIntentPresentation(
     val title: String? = null,
     val artist: String? = null,
     val failureCode: String? = null,
+    val transferId: String = stableId,
 )
 
 enum class DownloadPresentationAction { PLAY, CANCEL, RETRY }

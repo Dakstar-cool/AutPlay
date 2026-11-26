@@ -211,6 +211,25 @@ private fun ColumnScope.OnlineMusicResults(service: DesktopOnlineMusic, lease: A
         target = value; vault = null; discovery = null; offset = 0; cursor = null; previous = emptyList(); error = false
         refresh++
     }
+    val album = target?.takeIf { it.entity != null && it.kind == "album" && !savedOnly }
+    var showActions by remember(album, lease) { mutableStateOf(false) }
+    if (album != null) {
+        if (!showActions) {
+            if (stack.isNotEmpty()) TextButton(onClick = {
+                val last = stack.last(); stack = stack.dropLast(1); open(last)
+            }) { Text(if (ru) "Назад" else "Back") }
+            Text(album.query, style = MaterialTheme.typography.titleLarge)
+        }
+        TextButton(onClick = { showActions = !showActions }) {
+            Text(if (showActions) (if (ru) "Треклист" else "Tracklist") else (if (ru) "Действия в каталоге" else "Catalogue actions"))
+        }
+        if (!showActions) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                DesktopAlbumTracklist(service, lease, ru, album.query, album.albumArtist, album.entity)
+            }
+            return
+        }
+    }
     LaunchedEffect(target, cursor, offset, refresh) {
         val value = target ?: return@LaunchedEffect
         if (rankedCards != null) return@LaunchedEffect
@@ -322,7 +341,7 @@ private fun ColumnScope.OnlineMusicResults(service: DesktopOnlineMusic, lease: A
                             val artist = card.entityType == "artist"
                             fun drill(releases: Boolean) {
                                 target?.let { stack = stack + it }
-                                open(MusicBrowse(card.title, if (artist) "artist" else "album", AccountUuid(card.entityId), releases))
+                                open(MusicBrowse(card.title, if (artist) "artist" else "album", AccountUuid(card.entityId), releases, card.artist))
                             }
                             if (artist) TextButton(onClick = { drill(true) }) { Text(if (ru) "Альбомы" else "Albums") }
                             TextButton(onClick = { drill(false) }) { Text(if (ru) "Треки" else "Tracks") }

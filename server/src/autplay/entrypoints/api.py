@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
+from autplay.adapters.postgresql.artist_onboarding import ArtistOnboarding
 from autplay.adapters.postgresql.media_source import SystemElapsedClock
 from autplay.adapters.postgresql.media_source_runtime import MediaSourceDatabaseRuntime
 from autplay.adapters.postgresql.readiness import (
@@ -34,6 +35,7 @@ from autplay.application.backup_control import (
 from autplay.application.catalog_downloads import CatalogDownloads
 from autplay.application.catalogue_context import CatalogueContextService
 from autplay.application.discovery_automation import DiscoveryAutomationService
+from autplay.application.external_collections import ExternalCollections
 from autplay.application.guest_room import GuestRoomService
 from autplay.application.internet_music import InternetMusicService
 from autplay.application.music_discovery import MusicDiscoveryService
@@ -43,6 +45,7 @@ from autplay.application.public_access import PublicAccessService
 from autplay.application.sona_collection import SonaCollectionService
 from autplay.application.track_metadata import TrackMetadataService
 from autplay.application.training_consent import TrainingConsentService
+from autplay.application.vault_name_jobs import VaultNameJobs
 from autplay.application.web_admin import WebAdminService
 from autplay.domain.auth import Principal
 from autplay.domain.resource_admission import ResourceAdmissionError
@@ -55,6 +58,7 @@ from autplay.entrypoints.admin_web_http import (
     Renderer,
     create_admin_web_router,
 )
+from autplay.entrypoints.artist_onboarding_http import artist_onboarding_router
 from autplay.entrypoints.auth_http import bearer_authentication, create_auth_router
 from autplay.entrypoints.backup_control_http import create_backup_control_router
 from autplay.entrypoints.catalog_composition import CatalogRuntime
@@ -119,6 +123,7 @@ from autplay.entrypoints.discovery_automation_api import (
     create_discovery_automation_api_router,
 )
 from autplay.entrypoints.discovery_automation_http import create_discovery_automation_router
+from autplay.entrypoints.external_collection_http import external_collection_router
 from autplay.entrypoints.guest_room_http import create_guest_room_router
 from autplay.entrypoints.import_http import ImportHttpService, create_import_router
 from autplay.entrypoints.library_http import LibraryQueryService, create_library_router
@@ -287,6 +292,7 @@ def create_app(
                 provider_factory,
                 CatalogPageCache(sessionmaker(engine, class_=Session, expire_on_commit=False)),
                 read_public=catalog.work.get,
+                discogs_search=bool(resolved_settings.discogs_token.get_secret_value()),
             )
             catalogue_context = catalogue_context or CatalogueContextService(
                 sessionmaker(engine, class_=Session, expire_on_commit=False), catalogue_http_factory
@@ -363,6 +369,17 @@ def create_app(
     app.add_middleware(SyncBindingV2IngressMiddleware)
     api_router = APIRouter(prefix=API_V1_PREFIX)
     api_router.include_router(create_auth_router(authentication))
+    api_router.include_router(
+        artist_onboarding_router(
+            ArtistOnboarding(sessionmaker(engine)), bearer_authentication(authentication)
+        )
+    )
+    api_router.include_router(
+        external_collection_router(
+            ExternalCollections(sessionmaker(engine, expire_on_commit=False)),
+            bearer_authentication(authentication),
+        )
+    )
     api_router.include_router(
         create_playlist_share_router(
             PlaylistShares(sessionmaker(engine, expire_on_commit=False)),
@@ -727,6 +744,7 @@ def create_app(
                     discovery is not None and resolved_settings.discovery_automation_enabled
                 ),
                 sona_collection=SonaCollectionService(sessionmaker(engine, expire_on_commit=False)),
+                name_jobs=VaultNameJobs(sessionmaker(engine, expire_on_commit=False)),
                 device_admission=(
                     DeviceAdmissionWebAdapter(pairing) if pairing is not None else None
                 ),

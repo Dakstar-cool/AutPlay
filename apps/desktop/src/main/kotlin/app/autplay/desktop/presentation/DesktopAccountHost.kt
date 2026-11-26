@@ -1,6 +1,7 @@
 package app.autplay.desktop.presentation
 
 import app.autplay.application.desktop.account.*
+import app.autplay.application.devicecompatibility.DeviceContractV2Negotiation as D1
 import app.autplay.application.securestate.*
 import app.autplay.desktop.account.*
 import app.autplay.desktop.security.DesktopUnlockedRoot
@@ -23,6 +24,17 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonPrimitive
+
+/** First-time sign-in choices from the selected Mac server's verified discovery. Pending work has separate resume actions. */
+internal fun signInActions(families: Set<D1.Family>, hasLocalRoot: Boolean, hasTrustedProfile: Boolean): Set<DesktopAccountAction> = buildSet {
+    if (D1.Family.PORTABLE in families) {
+        add(DesktopAccountAction.LoginPortable)
+        if (hasLocalRoot) add(DesktopAccountAction.RegisterPortable)
+    }
+    if (D1.Family.ENROLLMENT in families) add(DesktopAccountAction.SubmitInvitation)
+    if (D1.Family.ADMISSION in families) add(DesktopAccountAction.RequestAdmission)
+    if (D1.Family.TRUSTED in families && hasTrustedProfile) add(DesktopAccountAction.EnrollTrusted)
+}
 
 /** Queue/native media effects are owned by Main's actual playback composition. No success defaults. */
 public interface DesktopAccountHostMedia {
@@ -120,6 +132,7 @@ public class DesktopAccountHost(
     private var policyProjection = DesktopProfileViewState()
     private var localReview: DesktopLocalDataReview? = null
     private var pregrantChoice: Pair<String, AccountLocalDataChoice>? = null
+    private var selectingServer: Boolean = false
     private var failure: AccountControlFailure? = null
     private var operation: DesktopAccountOperation? = null
     private var facts: Facts? = null
@@ -227,6 +240,13 @@ public class DesktopAccountHost(
                     execute(owned, intent.scope.lifetime)
                     requireLifetime(intent.scope.lifetime)
                     refreshFacts()
+                    if (intent.command.action == DesktopAccountAction.LoginPortable) {
+                        // The refresh materializes any explicitly selected local changes before the first sync.
+                        requireLifetime(intent.scope.lifetime)
+                        synchronizeBinding(facts?.binding ?: changed())
+                        requireLifetime(intent.scope.lifetime)
+                        refreshFacts()
+                    }
                 }
             } catch (error: Exception) {
                 try { serial.withLock { requireLifetime(intent.scope.lifetime); refreshFacts() } }
@@ -317,13 +337,18 @@ public class DesktopAccountHost(
                 runtime.loginPortable(command.publicId, requireNotNull(input.first)).hostAwait()
             }
             is DesktopAccountCommand.Discover -> {
-                pregrantChoice = null; localReview = null; trust.discover(requireNotNull(input.first))
+                beginServerSelection()
+                trust.discover(requireNotNull(input.first))
             }
             is DesktopAccountCommand.ConfirmTransport -> {
-                val choice = pregrantChoice?.takeIf { it.first == command.targetId }?.second ?: changed()
+                val choice = transportChoice(command.targetId) ?: changed()
                 trust.confirm(command, choice)
+                selectingServer = false
             }
-            is DesktopAccountCommand.PinnedTransport -> trust.preparePinned(requireNotNull(input.first), requireNotNull(input.second), input.extra[0], input.extra[1])
+            is DesktopAccountCommand.PinnedTransport -> {
+                beginServerSelection()
+                trust.preparePinned(requireNotNull(input.first), requireNotNull(input.second), input.extra[0], input.extra[1])
+            }
             is DesktopAccountCommand.ConfirmPinnedTransport -> trust.confirmPinned(command)
             is DesktopAccountCommand.Secret -> secret(command, requireNotNull(input.first), input.second, owner)
             is DesktopAccountCommand.RecoveryPreview -> {
@@ -411,7 +436,7 @@ public class DesktopAccountHost(
     private suspend fun invoke(command: DesktopAccountCommand.Invoke, owner: String): Unit {
         when (command.action) {
             DesktopAccountAction.Refresh -> runtime.reload().hostAwait()
-            DesktopAccountAction.CancelConnection -> { trust.close(); localReview = null; retireSecrets() }
+            DesktopAccountAction.CancelConnection -> { trust.close(); localReview = null; selectingServer = false; retireSecrets() }
             DesktopAccountAction.LockPortable -> { rootActivation.lock(); retireSecrets() }
             DesktopAccountAction.PrepareRotation -> portable.prepare()
             DesktopAccountAction.ImportRecoveryFile -> chooseSource(owner)?.let {
@@ -493,14 +518,7 @@ public class DesktopAccountHost(
             }
             DesktopAccountAction.Bind -> {
                 if (facts?.binding != command.targetId) changed()
-                val active = activate(); lastLease = active
-                val outcome = services.synchronize(active)
-                val current = currentLease()
-                if (current != null) lastLease = current
-                statisticsLease = null
-                if (current != active) changed()
-                outcome.failure?.let { throw DesktopSyncException(it) }
-                statisticsLease = current
+                synchronizeBinding(command.targetId ?: changed())
             }
             DesktopAccountAction.KeepLocal -> {
                 trust.view?.let { pregrantChoice = it.id to AccountLocalDataChoice.KeepLocal }
@@ -585,15 +603,17 @@ public class DesktopAccountHost(
     private suspend fun readQrInput(bytes: ByteArray, owner: String): Unit {
         val input = SecureJson.parse(bytes, 16_384, canonical = false)
         if ("invitation_id" in input && "invitation_secret" in input) {
+            if (selectingServer) throw AccountControlException(AccountControlFailure.TRUST_REQUIRED)
             invitationInput.prepare(bytes) { requireLifetime(owner) }
         } else if ((input["format"] as? JsonPrimitive)?.content == "autplay-self-device-pairing") {
             // The unsigned QR never selects an origin or establishes trust. The existing SELF
             // owner checks it against the independently confirmed selected server and fresh D1.
-            if (runtime.selected == null) throw AccountControlException(AccountControlFailure.TRUST_REQUIRED)
+            if (selectingServer || runtime.selected == null) throw AccountControlException(AccountControlFailure.TRUST_REQUIRED)
             sealLocalChoice()
             self.claimTextOrFile(bytes).hostAwait(); displayedSelfSlot = SecureRecordKind.SELF_RECIPIENT.reserved
         } else {
-            pregrantChoice = null; localReview = null; trust.submitDiscovery(bytes)
+            beginServerSelection()
+            trust.submitDiscovery(bytes)
         }
     }
 
@@ -604,17 +624,43 @@ public class DesktopAccountHost(
         }
     }
 
+    private fun beginServerSelection(): Unit {
+        selectingServer = true
+        pregrantChoice = null
+        localReview = null
+    }
+
+    private suspend fun synchronizeBinding(bindingId: String): Unit {
+        val active = activate()
+        if (active.bindingCommit.value != bindingId || active.sessionFamily == null) changed()
+        lastLease = active
+        statisticsLease = null
+        val outcome = services.synchronize(active)
+        val current = currentLease()
+        if (current != null) lastLease = current
+        if (current != active) changed()
+        outcome.failure?.let { throw DesktopSyncException(it) }
+        statisticsLease = current
+    }
+
+    private fun transportChoice(reviewId: String): AccountLocalDataChoice? {
+        if (localReview != null) return null
+        return pregrantChoice?.takeIf { it.first == reviewId }?.second
+            ?: AccountLocalDataChoice.KeepLocal.takeIf { facts?.pendingTargets?.isEmpty() == true }
+    }
+
     private fun localChoiceSummary(): String? {
         val review = trust.view
         val server = review?.serverIdentity ?: runtime.selected?.identity?.serverInstanceId ?: return null
-        val choice = if (review != null) pregrantChoice?.takeIf { it.first == review.id }?.second
+        val choice = if (review != null) transportChoice(review.id)
             else runtime.selected?.choice
         val ru = language() == DesktopLanguage.Russian
         val description = when (choice) {
-            AccountLocalDataChoice.KeepLocal -> if (ru) "Оставить данные локально; ничего не копировать." else "Keep data local; copy nothing."
+            AccountLocalDataChoice.KeepLocal -> if (ru) "Локальные изменения останутся на этом Mac." else "Local changes will stay on this Mac."
             is AccountLocalDataChoice.ReviewSelected -> if (ru) "Проверено и выбрано записей: ${choice.changeIds.size}." else "Reviewed records selected: ${choice.changeIds.size}."
             null -> return null
         }
+        if (review != null) return description
         return (if (ru) "Сервер: " else "Server: ") + server + "\n" + description + "\n" +
             (if (ru) "Аккаунт подтверждается в выбранной процедуре. Сохранённая операция сохраняет свой исходный выбор."
             else "Confirm the account in the selected ceremony. A retained operation keeps its original choice.")
@@ -836,6 +882,7 @@ public class DesktopAccountHost(
         val scope = DesktopAccountScope(lifetime, ++revision)
         used.clear()
         val permits = mutableListOf<DesktopAccountPermit>()
+        val discovery = runtime.selected?.discovery?.takeUnless { selectingServer }
         fun permit(action: DesktopAccountAction, target: String? = null, password: Boolean = false) {
             if (attached && !closed && !busy) permits.add(DesktopAccountPermit(UUID.randomUUID().toString(), action, target, password))
         }
@@ -857,7 +904,7 @@ public class DesktopAccountHost(
                         if (review.hasMore) permit(DesktopAccountAction.ReviewLocal, review.id)
                     }
                 }
-                if (pregrantChoice?.first == it.id) permit(DesktopAccountAction.ConfirmTransport, it.id)
+                if (transportChoice(it.id) != null) permit(DesktopAccountAction.ConfirmTransport, it.id)
             }
             if (!captured.root && captured.pendingTargets.isEmpty() && captured.binding == null) {
                 permit(DesktopAccountAction.CreatePortable); permit(DesktopAccountAction.ImportRecoveryFile)
@@ -872,19 +919,21 @@ public class DesktopAccountHost(
                     portable.previewId?.let { permit(DesktopAccountAction.RotateRoot, it, true) }
                 }
             }
-            if (runtime.selected != null && captured.binding == null) {
-                permit(DesktopAccountAction.SubmitInvitation, password = true)
-                if (captured.pendingTargets.isEmpty()) invitationInput.view()?.let {
-                    permit(DesktopAccountAction.ConfirmInvitation, it.id)
+            if (discovery != null && captured.binding == null) {
+                if (captured.pendingTargets.isEmpty()) {
+                    val actions = signInActions(discovery.families, captured.root, captured.trustedProfile != null)
+                    for (action in actions) {
+                        permit(action, password = action == DesktopAccountAction.SubmitInvitation ||
+                            action == DesktopAccountAction.LoginPortable || action == DesktopAccountAction.RegisterPortable)
+                    }
+                    if (DesktopAccountAction.SubmitInvitation in actions) invitationInput.view()?.let {
+                        permit(DesktopAccountAction.ConfirmInvitation, it.id)
+                    }
                 }
-                permit(DesktopAccountAction.RequestAdmission)
-                if (SecureRecordKind.SELF_RECIPIENT.reserved !in captured.pendingTargets.values)
+                if (D1.Family.SELF in discovery.families && SecureRecordKind.SELF_RECIPIENT.reserved !in captured.pendingTargets.values)
                     permit(DesktopAccountAction.ClaimSelf, password = true)
                 permit(DesktopAccountAction.PreviewRecovery); permit(DesktopAccountAction.PreviewDeletion)
                 permit(DesktopAccountAction.ChooseServerRecoveryFile)
-                captured.trustedProfile?.let { permit(DesktopAccountAction.EnrollTrusted) }
-                if (captured.pendingTargets.isEmpty()) permit(DesktopAccountAction.LoginPortable, password = true)
-                if (captured.root) permit(DesktopAccountAction.RegisterPortable, password = true)
             }
             if (captured.binding != null) {
                 permit(DesktopAccountAction.RefreshDevices); permit(DesktopAccountAction.ReadPolicy)
@@ -976,8 +1025,12 @@ public class DesktopAccountHost(
                 admissionAccountLabel = admission.state.value.accountLabel ?: captured?.admissionAccount,
                 admissionConfirmationRequired = admission.state.value.state == "APPROVED",
                 trustedConfirmationRequired = admission.state.value.state == "TRUSTED_CHALLENGE",
-                localChoiceSelected = pregrantChoice?.first == trust.view?.id && pregrantChoice != null,
+                localChoiceSelected = trust.view?.let { transportChoice(it.id) } != null,
+                localChangesSelected = trust.view?.let { transportChoice(it.id) } is AccountLocalDataChoice.ReviewSelected,
                 localChoiceSummary = localChoiceSummary(),
+                serverSelected = discovery != null,
+                passwordLoginUnavailable = captured != null && captured.binding == null && discovery != null &&
+                    !discovery.advertises(D1.Platform.MACOS, D1.Family.PORTABLE),
                 invitationReview = invitationInput.view()),
             selfView(captured),
             DesktopServerRecoveryView(if (recoveryState.confirmationRequired) DesktopAccountCondition.Attention
@@ -1106,7 +1159,7 @@ public class DesktopAccountHost(
                     SecureStateStatus.CAPACITY_REQUIRED -> AccountControlFailure.CAPACITY
                     SecureStateStatus.CONTEXT_CHANGED -> AccountControlFailure.CONTEXT_CHANGED
                     SecureStateStatus.CLOSED -> AccountControlFailure.CLOSED
-                    SecureStateStatus.IDENTITY_UNAVAILABLE -> AccountControlFailure.UNSUPPORTED
+                    SecureStateStatus.IDENTITY_UNAVAILABLE -> AccountControlFailure.LOCAL_IDENTITY_UNAVAILABLE
                     SecureStateStatus.LOCKED, SecureStateStatus.ACCESS_DENIED, SecureStateStatus.KEY_MISSING -> AccountControlFailure.AUTHENTICATION_REQUIRED
                     else -> AccountControlFailure.CONFLICT
                 }
@@ -1127,6 +1180,9 @@ public class DesktopAccountHost(
             AccountControlFailure.CAPACITY -> DesktopAccountIssue.Capacity
             AccountControlFailure.EXPIRED -> DesktopAccountIssue.Expired
             AccountControlFailure.UNSUPPORTED -> DesktopAccountIssue.Unsupported
+            AccountControlFailure.SERVER_CONNECTION_UNSUPPORTED -> DesktopAccountIssue.ServerConnectionUnsupported
+            AccountControlFailure.INVALID_RESPONSE -> DesktopAccountIssue.InvalidServerResponse
+            AccountControlFailure.LOCAL_IDENTITY_UNAVAILABLE -> DesktopAccountIssue.LocalIdentityUnavailable
             AccountControlFailure.AUTHENTICATION_REQUIRED -> DesktopAccountIssue.Reconnect
             AccountControlFailure.AUTHENTICATION_FAILED -> DesktopAccountIssue.Authentication
             AccountControlFailure.TRUST_REQUIRED -> DesktopAccountIssue.IdentityChanged

@@ -52,7 +52,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.autplay.R
@@ -90,10 +89,19 @@ public fun AutPlayAdaptiveShell(
         useDarkNavigationBarIcons = lightTheme,
     )
     val stateHolder = rememberSaveableStateHolder()
+    var libraryVisit by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+    val libraryKey = if (libraryVisit == 0) UiDestination.Library.route else "library/$libraryVisit"
+    val selectTab: (UiDestination) -> Unit = { target ->
+        if (target == UiDestination.Library) {
+            stateHolder.removeState(libraryKey)
+            libraryVisit++
+        }
+        onDestinationSelected(target)
+    }
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val widthClass = remember(maxWidth) { widthClassFor(maxWidth) }
         val routeContent: @Composable (PaddingValues) -> Unit = { padding ->
-            stateHolder.SaveableStateProvider(selectedDestination.route) {
+            stateHolder.SaveableStateProvider(if (selectedDestination == UiDestination.Library) libraryKey else selectedDestination.route) {
                 content(selectedDestination, padding, widthClass)
             }
         }
@@ -113,7 +121,7 @@ public fun AutPlayAdaptiveShell(
         } else if (widthClass == UiWidthClass.Compact) {
             CompactShell(
                 selectedDestination,
-                onDestinationSelected,
+                selectTab,
                 unreadSyncConflicts,
                 canNavigateBack,
                 onNavigateBack,
@@ -128,7 +136,7 @@ public fun AutPlayAdaptiveShell(
             RailShell(
                 widthClass,
                 selectedDestination,
-                onDestinationSelected,
+                selectTab,
                 unreadSyncConflicts,
                 canNavigateBack,
                 onNavigateBack,
@@ -242,17 +250,13 @@ private fun CompactNavigationBar(
     onDestinationSelected: (UiDestination) -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLowest) {
-        BoxWithConstraints(Modifier.fillMaxWidth().navigationBarsPadding()) {
-            val inlineLabels = maxWidth >= 360.dp
-            Row(
-                Modifier.fillMaxWidth().height(61.dp).padding(horizontal = 6.dp)
-                    .selectableGroup().testTag("compact-navigation"),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                UiDestination.compactNavigation.forEach { destination ->
-                    CompactNavigationItem(destination, selectedDestination, unreadSyncConflicts,
-                        onDestinationSelected, inlineLabels)
-                }
+        Row(
+            Modifier.fillMaxWidth().navigationBarsPadding().height(61.dp).padding(horizontal = 6.dp)
+                .selectableGroup().testTag("compact-navigation"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            UiDestination.compactNavigation.forEach { destination ->
+                CompactNavigationItem(destination, selectedDestination, unreadSyncConflicts, onDestinationSelected)
             }
         }
     }
@@ -379,7 +383,6 @@ private fun androidx.compose.foundation.layout.RowScope.CompactNavigationItem(
     selectedDestination: UiDestination,
     unreadSyncConflicts: Int,
     onDestinationSelected: (UiDestination) -> Unit,
-    inlineLabels: Boolean,
 ) {
     val label = stringResource(destination.labelRes)
     val selected = destination == selectedDestination
@@ -390,31 +393,14 @@ private fun androidx.compose.foundation.layout.RowScope.CompactNavigationItem(
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        val itemIcon: @Composable () -> Unit = {
-            Box(
-                Modifier.background(
-                    if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.13f) else Color.Transparent,
-                    RoundedCornerShape(10.dp),
-                ).padding(horizontal = 6.dp, vertical = 4.dp),
-            ) {
-                CompositionLocalProvider(LocalContentColor provides color) {
-                    DestinationIcon(destination, unreadSyncConflicts)
-                }
-            }
-        }
-        val itemLabel: @Composable () -> Unit = {
-            Text(label, color = color, style = MaterialTheme.typography.labelSmall, maxLines = 1,
-                overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-        }
-        if (inlineLabels) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                itemIcon()
-                itemLabel()
-            }
-        } else {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                itemIcon()
-                itemLabel()
+        Box(
+            Modifier.background(
+                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.13f) else Color.Transparent,
+                RoundedCornerShape(10.dp),
+            ).padding(horizontal = 10.dp, vertical = 4.dp),
+        ) {
+            CompositionLocalProvider(LocalContentColor provides color) {
+                DestinationIcon(destination, unreadSyncConflicts)
             }
         }
     }
@@ -439,7 +425,7 @@ private fun RailNavigationItem(
         selected = destination == selectedDestination,
         onClick = { onDestinationSelected(destination) },
         icon = { DestinationIcon(destination, unreadSyncConflicts) },
-        label = { Text(label, maxLines = 1) },
+        label = if (destination in UiDestination.compactNavigation) null else { { Text(label, maxLines = 1) } },
     )
 }
 

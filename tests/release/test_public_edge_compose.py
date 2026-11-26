@@ -27,7 +27,7 @@ def test_server_image_precreates_private_ledger_mountpoints_for_non_root_runtime
     assert "/var/lib/autplay/vault/quarantine" in dockerfile
 
 
-def _config(tmp_path: Path) -> dict[str, object]:
+def _config(tmp_path: Path, *, discogs: bool = False) -> dict[str, object]:
     secret_names = (
         "AUTPLAY_RUNTIME_POSTGRES_PASSWORD_FILE",
         "AUTPLAY_RUNTIME_DATABASE_URL_FILE",
@@ -56,6 +56,13 @@ def _config(tmp_path: Path) -> dict[str, object]:
     command = ["docker", "compose", "-p", "autplay-public-edge-test"]
     for compose_file in COMPOSE_FILES:
         command.extend(("-f", compose_file))
+    if discogs:
+        secret = tmp_path / "catalog-credential"
+        secret.write_text("test-catalog-token", encoding="utf-8")
+        environment["AUTPLAY_RUNTIME_DISCOGS_TOKEN_FILE"] = str(secret)
+        environment["AUTPLAY_SERVER_IMAGE"] = "autplay-server:test"
+        command.extend(("-f", "deploy/compose/compose.release.yaml"))
+        command.extend(("-f", "deploy/compose/compose.discogs.yaml"))
     command.extend(
         (
             "--profile",
@@ -78,6 +85,20 @@ def _config(tmp_path: Path) -> dict[str, object]:
         text=True,
     )
     return json.loads(result.stdout)  # type: ignore[no-any-return]
+
+
+def test_optional_discogs_file_only_reaches_the_two_api_services(tmp_path: Path) -> None:
+    base = cast(dict[str, Any], _config(tmp_path))["services"]
+    config = cast(dict[str, Any], _config(tmp_path, discogs=True))
+    name = "autplay-discogs-catalog"
+    assert Path(config["secrets"][name]["file"]) == tmp_path / "catalog-credential"
+    for service, definition in config["services"].items():
+        mounts = {s["source"] for s in definition.get("secrets", [])}
+        previous = {s["source"] for s in base[service].get("secrets", [])}
+        expected = service in {"api", "mobile-api"}
+        assert mounts == (previous | {name} if expected else previous)
+        path = definition.get("environment", {}).get("AUTPLAY_DISCOGS_TOKEN_FILE")
+        assert path == (f"/run/secrets/{name}" if expected else None)
 
 
 def test_public_edge_is_the_only_non_loopback_listener(tmp_path: Path) -> None:

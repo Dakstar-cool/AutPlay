@@ -64,9 +64,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.autplay.R
+import app.autplay.application.artist.TrackTitleQuery
 import app.autplay.application.search.LibrarySearchKind
 import app.autplay.playback.presentation.PlaybackPresentationState
-import app.autplay.ui.player.PlaybackTimeline
 import app.autplay.ui.core.LibraryFilter
 import app.autplay.ui.core.LibrarySection
 import app.autplay.ui.core.LibrarySort
@@ -97,6 +97,7 @@ public data class CoreCollectionUiItem(
     public val itemCount: Int? = null,
     public val artworkTrackId: String? = null,
     public val releaseMbid: String? = null,
+    public val releaseDate: String? = null,
 )
 
 public data class CoreArtistUiItem(
@@ -174,7 +175,6 @@ public data class HomeScreenUiState(
     public val continueListening: HomeContinueUiItem? = null,
     public val recentlyPlayed: List<HomeTrackUiItem> = emptyList(),
     public val recentlyAdded: List<HomeTrackUiItem> = emptyList(),
-    public val playlists: List<CoreCollectionUiItem> = emptyList(),
     public val offlineReady: List<HomeTrackUiItem> = emptyList(),
     public val problems: List<HomeProblemUiItem> = emptyList(),
     public val recommendationError: Boolean = false,
@@ -254,7 +254,6 @@ public fun HomeProductScreen(
     onPlayTrack: (String) -> Unit = {},
     onPlayRecommendation: (String) -> Unit = {},
     recommendationPlaybackAllowed: Boolean = true,
-    onOpenPlaylist: (String) -> Unit = {},
     onOpenOffline: () -> Unit = {},
     onOpenProblems: () -> Unit = {},
     playerState: PlaybackPresentationState = PlaybackPresentationState(),
@@ -273,9 +272,7 @@ public fun HomeProductScreen(
     onOpenRelease: (String) -> Unit = {},
     onAddLocal: () -> Unit = {},
     importingLocalTrack: Boolean = false,
-    onSeekBegin: (Long) -> Unit = {},
-    onSeekUpdate: (Long) -> Unit = {},
-    onSeekCommit: () -> Unit = {},
+    onSeek: (Long) -> Unit = {},
     onTimelineObserving: (Boolean) -> Unit = {},
     onContinueListening: () -> Unit = {
         (state.continueListening?.trackId ?: state.recentlyPlayed.firstOrNull()?.id)?.let(onPlayTrack)
@@ -313,6 +310,12 @@ public fun HomeProductScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 val heroModifier = Modifier.requiredWidth(maxWidth + 40.dp)
+                if (playerState.mediaId != null) {
+                    DisposableEffect(onTimelineObserving) {
+                        onTimelineObserving(true)
+                        onDispose { onTimelineObserving(false) }
+                    }
+                }
                 if (showArtwork) {
                     HomePlaybackHero(
                         state = heroState,
@@ -324,6 +327,8 @@ public fun HomeProductScreen(
                         onLike = onLikeHeroTrack,
                         onOpenListenTogether = onOpenListenTogether,
                         modifier = heroModifier,
+                        playerState = playerState,
+                        onSeek = onSeek,
                         swipeTargets = swipeTargets,
                         onPrevious = onPreviousTrack,
                         onNext = onNextTrack,
@@ -340,6 +345,8 @@ public fun HomeProductScreen(
                         onLike = onLikeHeroTrack,
                         onOpenListenTogether = onOpenListenTogether,
                         modifier = heroModifier,
+                        playerState = playerState,
+                        onSeek = onSeek,
                     )
                 }
             }
@@ -361,18 +368,7 @@ public fun HomeProductScreen(
             }
         }
         item(key = "home:contexts:${state.wheelOwner}") {
-            Column {
-                if (playerState.mediaId != null) {
-                    DisposableEffect(onTimelineObserving) {
-                        onTimelineObserving(true)
-                        onDispose { onTimelineObserving(false) }
-                    }
-                    Column(Modifier.fillMaxWidth().testTag("home-wheel-timeline")) {
-                        PlaybackTimeline(playerState, onSeekBegin, onSeekUpdate, onSeekCommit)
-                    }
-                }
-                HomeWaveWheel(state.wheelOrder, state.wheelMixes, myWaveAllowed, playerState.isPlaying, onPlayWheelMix)
-            }
+            HomeWaveWheel(state.wheelOrder, state.wheelMixes, myWaveAllowed, playerState.isPlaying, onPlayWheelMix)
         }
         if (state.offlineFallback) {
             item {
@@ -382,10 +378,8 @@ public fun HomeProductScreen(
                 )
             }
         }
-        if (state.releases.isNotEmpty()) {
-            item(key = "home:new-releases") {
-                HomeReleaseSection(releases = state.releases, onOpenRelease = onOpenRelease)
-            }
+        item(key = "home:new-releases") {
+            HomeReleaseSection(releases = state.releases, onOpenRelease = onOpenRelease)
         }
         val recentItems = state.recentlyPlayed.ifEmpty { state.recentlyAdded }
         if (recentItems.isNotEmpty()) {
@@ -417,18 +411,8 @@ public fun HomeProductScreen(
                 modifier = Modifier.testTag("home-recommendation")
                     .onVisibilityChanged(minFractionVisible = 0.01f) { onRecommendationVisible(item.id) },
             ) {
-                AutPlayIconButton(AutPlayIcon.ThumbUp, R.string.action_like, { onLike(item.id) }, enabled = item.feedbackEnabled)
                 AutPlayIconButton(AutPlayIcon.ThumbDown, R.string.action_dislike, { onDislike(item.id) }, enabled = item.feedbackEnabled)
-            }
-        }
-        if (state.playlists.isNotEmpty()) {
-            items(state.playlists, key = { "home-playlist:${it.id}" }) { playlist ->
-                AutPlayCard(onClick = { onOpenPlaylist(playlist.id) }) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(playlist.title, style = MaterialTheme.typography.titleMedium)
-                        playlist.subtitle?.let { Text(it, color = AutPlayTokens.colors.mutedText) }
-                    }
-                }
+                AutPlayIconButton(AutPlayIcon.ThumbUp, R.string.action_like, { onLike(item.id) }, enabled = item.feedbackEnabled)
             }
         }
         if (state.offlineReady.isNotEmpty()) {
@@ -835,7 +819,8 @@ public fun LibraryProductScreen(
 private fun PersonalLibraryMatches(query: String, state: LibraryScreenUiState, padding: PaddingValues,
     play: (String) -> Unit, open: (LibrarySection, String) -> Unit) {
     fun matches(value: String?) = value?.contains(query, ignoreCase = true) == true
-    val tracks = state.tracks.filter { state.section == LibrarySection.Tracks && (matches(it.title) || matches(it.artist)) }
+    val trackQuery = remember(query) { TrackTitleQuery(query) }
+    val tracks = state.tracks.filter { state.section == LibrarySection.Tracks && (trackQuery.matches(it.title) || matches(it.artist)) }
     val artists = state.artists.filter { state.section == LibrarySection.Artists && app.autplay.application.artist.artistNameMatches(it.name, query) }
     val albums = state.albums.filter { state.section == LibrarySection.Albums && (matches(it.title) || matches(it.subtitle)) }
     val playlists = state.playlists.filter { state.section == LibrarySection.Playlists && matches(it.title) }
@@ -881,8 +866,8 @@ private fun LazyGridScope.collectionItems(
     }
     gridItems(collections, key = { "$keyPrefix${it.id}" }) { collection ->
         val count = collection.itemCount?.let { pluralStringResource(R.plurals.ui_library_refresh_collection_track_count, it, it) }
-        val subtitle = listOfNotNull(collection.subtitle?.takeIf { it.isNotBlank() }, count).joinToString(" · ")
-        CollectionCoverTile(collection.title, collection.artworkTrackId, subtitle, Modifier.testTag("$keyPrefix${collection.id}"), catalogCoverId = collection.releaseMbid) {
+        CollectionCoverTile(collection.title, collection.artworkTrackId, collection.subtitle, Modifier.testTag("$keyPrefix${collection.id}"),
+            caption = listOfNotNull(releaseYear(collection.releaseDate), count).joinToString(" · ").ifEmpty { null }, catalogCoverId = collection.releaseMbid) {
             onOpenCollection(section, collection.id)
         }
     }
@@ -1024,6 +1009,7 @@ private fun LibraryTrackCard(
         selected = track.selected,
         modifier = Modifier.testTag("library-track-${track.id}"),
     ) {
+        if (downloadsAvailable) app.autplay.ui.downloads.InlineTrackDownload(track.id, track.downloaded) { onDownload(track.id) }
         AutPlayIconButton(
             icon = if (track.loved) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
             labelRes = if (track.loved) R.string.action_liked else R.string.action_like,
@@ -1044,12 +1030,6 @@ private fun LibraryTrackCard(
                 text = { Text(stringResource(R.string.playlist_add_selected)) },
                 onClick = { dismiss(); onAddToPlaylist(track.id) },
             )
-            if (downloadsAvailable && !track.downloaded) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.action_download)) },
-                    onClick = { dismiss(); onDownload(track.id) },
-                )
-            }
             if (track.permissionRevoked) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.action_choose_folder_again)) },

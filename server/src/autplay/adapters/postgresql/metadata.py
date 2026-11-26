@@ -28,6 +28,7 @@ EXPECTED_SCHEMAS: frozenset[str] = frozenset(
     ]
 )
 EXPECTED_TABLE_KEYS: tuple[str, ...] = (
+    "importing.collection_import",
     "discovery.preservation_case",
     "discovery.preservation_run",
     "discovery.preservation_check",
@@ -220,6 +221,7 @@ EXPECTED_TABLE_KEYS: tuple[str, ...] = (
     "social.guest_rate_window",
 )
 EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
+    "importing.collection_import": 12,
     "discovery.preservation_case": 4,
     "discovery.preservation_run": 5,
     "discovery.preservation_check": 7,
@@ -264,7 +266,7 @@ EXPECTED_TABLE_COLUMN_COUNTS: dict[str, int] = {
     "library.metadata_artwork": 3,
     "library.track_metadata": 10,
     "library.track_metadata_revision": 6,
-    "account.user_account": 10,
+    "account.user_account": 11,
     "account.self_device_pairing": 33,
     "account.self_pairing_command": 12,
     "account.self_pairing_rate": 3,
@@ -421,6 +423,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "portable_challenge_binding_commit",
         "portable_record_account_cursor",
         "portable_record_listening_aliases",
+        "collection_import_owner_collection",
         "preservation_pending",
         "portable_taste_signal_account_cursor",
         "ix_training_participant_owner",
@@ -585,7 +588,7 @@ EXPECTED_EXPLICIT_INDEX_NAMES: frozenset[str] = frozenset(
         "ix_social_guest_rate_expiry",
     }
 )
-EXPECTED_COLUMN_COUNT = 2131
+EXPECTED_COLUMN_COUNT = 2144
 
 __all__ = (
     "EXPECTED_COLUMN_COUNT",

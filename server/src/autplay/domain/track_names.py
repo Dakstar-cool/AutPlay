@@ -14,6 +14,8 @@ from autplay.domain.artist_credits import (
     single_stage_credit,
     trim_repeated_credit,
 )
+from autplay.domain.featured_artists import featured_names, primary_credit
+from autplay.domain.title_edits import edit_title, session_parts
 
 _AUDIO = re.compile(r"\.(?:mp3|flac|m4a|aac|ogg|oga|opus|wav|aif|aiff|alac|wma|aifc)$", re.I)
 _BAND = re.compile(r"(?<![\w])25\s*(?:[/\u2010\u2011\u2013—-]|\s)\s*17(?![\w])")
@@ -45,19 +47,40 @@ _SEPARATE_NOTICE = re.compile(
     re.I,
 )
 _DERIVED = {"FILENAME", "SOURCE_LABEL"}
+_PROVISIONAL = _DERIVED | {"EMBEDDED", "SOURCE_NATIVE"}
 _HCWW_VIDEO_CREDIT = re.compile(
     r"\s+[-\u2013—|]\s*HC WORLDWIDE\s*\(OFFICIAL (?:FULL HD|HD|4K) VERSION HCWW\)\s*$", re.I
 )
 _POSSIBLE_DECORATION = re.compile(r'[_@|\u2013—\[\]()"”»-]')
 _VENUE_CREDIT = re.compile(r"\s+(?:live\s+@\s*([^@|()\[\]]{1,80})|@\s*(16\s+тонн))$", re.I)
-_SESSION_CREDIT = re.compile(r"\s+[|\u2013—-]\s*([^\W_][\w '&\u2019.-]{0,60}\s+sessions)$", re.I)
-DISPLAY_VERSION = "display-v7"
+DISPLAY_VERSION = "display-v9"
+
+_SITE = r"(?:https?://)?(?:www\.)?(?:muzmo\.ru|hitmos?(?:\.(?:ru|me|top|net|com|fm))?|lightaudio\.ru|mp3on\.net|zaycev\.net)/?"
+_SITE_HINT = re.compile(r"muzmo|hitmo|lightaudio|mp3on|zaycev", re.I)
+_SITE_GROUP = re.compile(rf"\[\s*{_SITE}\s*\]|\(\s*{_SITE}\s*\)", re.I)
+_SITE_TAG = rf"(?:{_SITE_GROUP.pattern}|{_SITE})"
+_JOIN = r"(?:\s*[,;|_]\s*|\s+[-\u2013\u2014]\s+|\s+)"
+_SITE_EDGES = re.compile(rf"^(?:{_SITE_TAG}(?:{_JOIN}|$))+|(?:(?:{_JOIN}){_SITE_TAG})+$", re.I)
+_SITE_BETWEEN = re.compile(rf"{_JOIN}{_SITE_TAG}(?={_JOIN})", re.I)
+
+
+def strip_source_site(value: str) -> str:
+    """Only remove known source tags, keeping other domains and punctuation in names."""
+    if not _SITE_HINT.search(value):
+        return value
+    value = value.strip()
+    extension = _AUDIO.search(value)
+    stem = value[: extension.start()] if extension else value
+    clean = _SITE_EDGES.sub("", stem)
+    clean = display(_SITE_GROUP.sub(" ", _SITE_BETWEEN.sub("", clean)))
+    return clean + extension[0] if extension and clean else clean
 
 
 def performance_title(title: str) -> str:
     """Keep the venue or session as an edition qualifier on a provisional title."""
     title = _VENUE_CREDIT.sub(lambda m: f" (Live at {m[1] or m[2]})", title)
-    return _SESSION_CREDIT.sub(r" (\1)", title)
+    base, session = session_parts(title)
+    return edit_title(f"{base} ({session})" if session else title)
 
 
 def strip_video_credit(title: str) -> str:
@@ -111,10 +134,30 @@ def track_names(
     filename: bool = True,
     source_id: str | None = None,
     catalog: RecordingCredit | None = None,
+    move_featured: bool = True,
+) -> tuple[str | None, str | None]:
+    name, credit = _source_names(
+        title, artist, filename=filename, source_id=source_id, catalog=catalog
+    )
+    return featured_names(name, credit) if move_featured and name and credit else (name, credit)
+
+
+def _source_names(
+    title: str | None,
+    artist: str | None,
+    *,
+    filename: bool = True,
+    source_id: str | None = None,
+    catalog: RecordingCredit | None = None,
 ) -> tuple[str | None, str | None]:
     """Clean provisional source labels; a verified catalog title keeps its published spelling."""
     name = display(title) if title else title
     label = display(artist) if artist else artist
+    if filename:
+        if name:
+            name = strip_source_site(name) or None
+        if label:
+            label = strip_source_site(label) or None
     linked = catalog if catalog and label and catalog.matches(label) else None
     credit = (
         linked.preferred
@@ -132,7 +175,7 @@ def track_names(
         else single_stage_credit(credit) or (declared_credit(label) if label else None)
     )
     if not stage and not is_file and not _POSSIBLE_DECORATION.search(name):
-        return name, credit
+        return edit_title(name), credit
     stem = _AUDIO.sub("", name) if is_file else name
     if (
         source_id
@@ -142,7 +185,9 @@ def track_names(
     ):
         stem = stem[: -len(source_id) - 1] or stem
     if is_file:
-        stem = display(stem.replace("_", " ")) or name
+        stem = strip_source_site(stem.replace("_", " "))
+        if not stem:
+            return None, credit
     elif re.search(r"_[-\u2013—]_", stem):
         stem = " - ".join(_unpack_words(part) for part in re.split(r"_[-\u2013—]_", stem))
     # First remove wrappers so 'Artist - Title - Official Video' retains the recording title.
@@ -201,17 +246,45 @@ def project_names(
                 catalog = linked
                 break
     artist_proof = proofs.get("artist") or {}
+
+    def cleared_source_tag(key: str) -> bool:
+        proof = proofs.get(key) or {}
+        return (
+            proof.get("source") in _PROVISIONAL
+            and proof.get("normalization_version") in {"display-v8", DISPLAY_VERSION}
+            and fields.get(key) is None
+        )
+
+    def protected(key: str) -> bool:
+        proof = proofs.get(key) or {}
+        return bool(
+            proof.get("locked")
+            or proof.get("source") == "USER"
+            or (key in fields and fields[key] is None and not cleared_source_tag(key))
+        )
+
     hint = fields.get("artist", raw_artist)
-    if artist_proof.get("source") in _DERIVED:
+    if artist_proof.get("source") in _DERIVED or cleared_source_tag("artist"):
         hint = raw_artist
-    if (
-        canonical.get("artist")
-        and not artist_proof.get("locked")
-        and artist_proof.get("source") != "USER"
-        and not ("artist" in fields and fields["artist"] is None)
-    ):
+    if canonical.get("artist") and not protected("artist"):
         hint = canonical["artist"]
     originals = dict(document.get("name_originals_v1", {}))
+    # A new title must not inherit guests that came solely from its predecessor.
+    previous_artist = originals.get("artist") or {}
+    original_artist = previous_artist.get("value")
+    original_proof = previous_artist.get("provenance") or {}
+    restore_credit = (
+        not canonical
+        and not protected("artist")
+        and artist_proof.get("source") in {"EMBEDDED", "SOURCE_NATIVE"}
+        and artist_proof.get("normalization_version") == DISPLAY_VERSION
+        and original_proof.get("source_id") == artist_proof.get("source_id")
+        and isinstance(hint, str)
+        and isinstance(original_artist, str)
+        and primary_credit(hint) != hint
+    )
+    if restore_credit:
+        hint = original_artist
     # A normalized embedded tag may be the only place the two roles were declared.
     if (
         not canonical
@@ -219,31 +292,78 @@ def project_names(
         and not artist_proof.get("locked")
         and artist_proof.get("source") in {"EMBEDDED", "SOURCE_NATIVE"}
         and artist_proof.get("normalization_version")
-        in {"display-v3", "display-v4", "display-v5", "display-v6", DISPLAY_VERSION}
+        in {
+            "display-v3",
+            "display-v4",
+            "display-v5",
+            "display-v6",
+            "display-v7",
+            "display-v8",
+            DISPLAY_VERSION,
+        }
     ):
         original = (originals.get("artist") or {}).get("value")
         declared = declared_credit(original) if isinstance(original, str) else None
         if declared and declared.stage.casefold() == hint.casefold():
             hint = original
     native_id = (document.get("acquisition_evidence") or {}).get("source_id")
-    title, artist = track_names(
+    title, artist = _source_names(
         raw_title,
         hint,
         source_id=native_id if isinstance(native_id, str) else None,
         catalog=catalog,
     )
+    title_proof = proofs.get("title") or {}
+    stored_title = fields.get("title")
+    if isinstance(stored_title, str) and title_proof.get("source") in {"EMBEDDED", "SOURCE_NATIVE"}:
+        title = _source_names(stored_title, hint, catalog=catalog)[0]
+        # The embedded tag can be the only evidence for a guest after an earlier projection.
+        original_title = (originals.get("title") or {}).get("value")
+        if (
+            title_proof.get("normalization_version") == DISPLAY_VERSION
+            and isinstance(original_title, str)
+            and artist
+        ):
+            original_name = _source_names(original_title, hint, catalog=catalog)[0]
+            if (
+                original_name
+                and original_name != title
+                and featured_names(original_name, artist)[0] == title
+            ):
+                title = original_name
+    display_title = canonical.get("title") or title
+    display_artist = canonical.get("artist") or artist
+    if display_artist and catalog and catalog.matches(display_artist):
+        display_artist = catalog.preferred
+    movable = {
+        key
+        for key in ("title", "artist")
+        if not protected(key)
+        and (
+            key not in fields
+            or canonical.get(key)
+            or (proofs.get(key) or {}).get("source") in _PROVISIONAL
+        )
+    }
+    moved = {}
+    if "title" in movable and display_title and display_artist:
+        credit = display_artist if "artist" in movable else fields.get("artist")
+        if isinstance(credit, str):
+            name, combined = featured_names(display_title, credit)
+            if name != display_title and (combined == credit or "artist" in movable):
+                moved = {"title": name, "artist": combined}
     changed = False
     for key, fallback, raw in (("artist", artist, raw_artist), ("title", title, raw_title)):
         old = fields.get(key)
         proof = proofs.get(key) or {}
-        if proof.get("locked") or proof.get("source") == "USER" or (key in fields and old is None):
+        if protected(key):
             continue
         if canonical.get(key):
             value = canonical[key]
             if key == "artist" and catalog and catalog.matches(value):
                 value = catalog.preferred
             source, source_id = "MUSICBRAINZ", canonical["mb_recording_id"]
-        elif key in fields and proof.get("source") not in _DERIVED:
+        elif key in fields and proof.get("source") not in _DERIVED and not cleared_source_tag(key):
             if not isinstance(old, str):
                 continue
             value = display(old)
@@ -253,23 +373,39 @@ def project_names(
                     if catalog and catalog.matches(value)
                     else display_credit(_BAND.sub("25/17", value))
                 )
+                if proof.get("source") in _PROVISIONAL:
+                    value = artist if restore_credit else strip_source_site(value) or None
             if key == "title" and proof.get("source") in {"EMBEDDED", "SOURCE_NATIVE"}:
-                value = fallback if old == raw_title else track_names(old, hint, catalog=catalog)[0]
-            if not proof or value == old:
+                value = fallback
+            if not proof or (key not in moved and value == old):
                 continue
             source, source_id = proof["source"], proof["source_id"]
         else:
             value = fallback
             source = "FILENAME" if raw_title and _AUDIO.search(raw_title) else "SOURCE_LABEL"
-            source_id = "track-description-v7"
-            if value == raw and key not in fields:
+            source_id = "track-description-v9"
+            if key not in moved and value == raw and key not in fields:
                 continue
-        if value == old and (source != "MUSICBRAINZ" or proof.get("source") == source):
+        value = moved.get(key, value)
+        evidence_value = old if isinstance(old, str) else raw
+        site_only = (
+            value is None
+            and isinstance(evidence_value, str)
+            and bool(_SITE_HINT.search(evidence_value))
+            and not strip_source_site(evidence_value)
+        )
+        if (
+            value == old
+            and (key in fields or not site_only)
+            and (source != "MUSICBRAINZ" or proof.get("source") == source)
+        ):
             continue
-        if value is None and proof.get("source") in _DERIVED:
+        if value is None and proof.get("source") in _DERIVED and not site_only:
             fields.pop(key)
             proofs.pop(key)
-        elif isinstance(value, str) and 0 < len(value) <= 500 and all(ord(c) >= 32 for c in value):
+        elif site_only or (
+            isinstance(value, str) and 0 < len(value) <= 500 and all(ord(c) >= 32 for c in value)
+        ):
             fields[key] = value
             proofs[key] = {
                 "source": source,

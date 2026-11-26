@@ -2,6 +2,7 @@ package app.autplay.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+import app.autplay.playback.presentation.canSeek
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.widthIn
@@ -102,6 +116,8 @@ public fun HomePlaybackHero(
     onPrevious: () -> Unit = {},
     onNext: () -> Unit = {},
     onOpenArtist: (() -> Unit)? = null,
+    playerState: PlaybackPresentationState = PlaybackPresentationState(),
+    onSeek: (Long) -> Unit = {},
 ) {
     val title = state.title ?: stringResource(R.string.player_nothing_playing)
     val artist = state.artist ?: stringResource(R.string.player_unknown_artist)
@@ -148,16 +164,7 @@ public fun HomePlaybackHero(
                 label = playLabel, enabled = canTogglePlayback,
                 onClick = { if (state.hasActivePlayback) onTogglePlayPause() else state.trackId?.let(onPlayTrack) },
             )
-            Surface(
-                onClick = openTarget, enabled = hasPlaybackTarget,
-                modifier = Modifier.weight(1f), shape = CircleShape, color = colors.surfaceContainerHigh,
-            ) {
-                Box(Modifier.heightIn(min = 52.dp).padding(horizontal = 10.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.Center) {
-                    Text(title, textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            }
+            HomeTrackTitle(title, playerState, onSeek, Modifier.weight(1f), openTarget.takeIf { hasPlaybackTarget })
             HeroIconButton(
                 icon = if (state.liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
                 label = stringResource(if (state.liked) R.string.action_liked else R.string.action_like),
@@ -180,6 +187,8 @@ internal fun HomeWaveStartHero(
     onOpenListenTogether: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenArtist: (() -> Unit)? = null,
+    playerState: PlaybackPresentationState = PlaybackPresentationState(),
+    onSeek: (Long) -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     val play = stringResource(R.string.home_my_wave)
@@ -201,30 +210,75 @@ internal fun HomeWaveStartHero(
         ) {
             Box(contentAlignment = Alignment.Center) { AutPlayPlatformIcon(AutPlayIcon.Play, null, Modifier.size(36.dp)) }
         }
-        if (state.title != null) {
-            Surface(shape = CircleShape, color = colors.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.heightIn(min = 52.dp).padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    HeroIconButton(
-                        icon = AutPlayIcon.Play, label = stringResource(R.string.action_continue),
-                        enabled = if (state.hasActivePlayback) state.playPauseEnabled else enabled,
-                        onClick = onResume,
-                    )
-                    Text(listOfNotNull(state.artist?.takeIf { it.isNotBlank() }, state.title).joinToString(" — "),
-                        Modifier.weight(1f).then(if (onOpenArtist == null) Modifier else
-                            Modifier.testTag("hero-resume-artist").clickable(onClickLabel = stringResource(R.string.detail_open_artist),
-                                onClick = onOpenArtist)).padding(vertical = 8.dp), textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    if (state.trackId != null) HeroIconButton(
-                        icon = if (state.liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
-                        label = stringResource(if (state.liked) R.string.action_liked else R.string.action_like),
-                        enabled = true, selected = state.liked, onClick = { onLike(state.trackId) },
-                    )
-                }
+        if (state.title != null || state.hasActivePlayback) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                HeroIconButton(
+                    icon = AutPlayIcon.Play, label = stringResource(R.string.action_continue),
+                    enabled = if (state.hasActivePlayback) state.playPauseEnabled else enabled,
+                    onClick = onResume,
+                )
+                HomeTrackTitle(listOfNotNull(state.artist?.takeIf { it.isNotBlank() }, state.title
+                    ?: stringResource(R.string.player_nothing_playing)).joinToString(" — "), playerState, onSeek,
+                    Modifier.weight(1f).testTag("hero-resume-artist"), onOpenArtist,
+                    stringResource(R.string.detail_open_artist))
+                if (state.trackId != null) HeroIconButton(
+                    icon = if (state.liked) AutPlayIcon.FavoriteFilled else AutPlayIcon.Favorite,
+                    label = stringResource(if (state.liked) R.string.action_liked else R.string.action_like),
+                    enabled = true, selected = state.liked, onClick = { onLike(state.trackId) },
+                )
             }
         }
         if (!enabled && !emptyLibrary) Text(stringResource(R.string.home_my_wave_locked),
             textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun HomeTrackTitle(
+    title: String, player: PlaybackPresentationState, onSeek: (Long) -> Unit, modifier: Modifier,
+    onClick: (() -> Unit)?, clickLabel: String? = null,
+) {
+    val duration = player.durationMs?.takeIf { it > 0 && !player.isLive && player.mediaId != null }
+    val canSeek = duration != null && player.canSeek
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+    var preview by remember(player.mediaId, duration, canSeek) { mutableStateOf<Long?>(null) }
+    val seek by rememberUpdatedState(onSeek)
+    val position = (preview ?: player.seekPreviewPositionMs ?: player.positionMs).coerceIn(0L, duration ?: 0L)
+    val progress = if (duration == null) Modifier else {
+        val description = stringResource(R.string.player_progress_description, formatDuration(position), formatDuration(duration))
+        Modifier.semantics {
+            progressBarRangeInfo = ProgressBarRangeInfo(position.toFloat(), 0f..duration.toFloat())
+            stateDescription = description
+            if (canSeek) setProgress { value -> seek(value.toLong().coerceIn(0, duration)); true }
+        }.then(if (!canSeek) Modifier else Modifier.pointerInput(player.mediaId, duration, rtl) {
+            detectHorizontalDragGestures(
+                onDragEnd = { preview?.let(seek); preview = null },
+                onDragCancel = { preview = null },
+            ) { change, _ ->
+                val fraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                preview = (duration * (if (rtl) 1f - fraction else fraction)).toLong()
+                change.consume()
+            }
+        })
+    }
+    TrackProgressTitle(title, duration?.let { position.toFloat() / it } ?: 0f,
+        modifier.testTag("home-track-title").then(progress)
+            .then(if (onClick == null) Modifier else Modifier.clickable(onClickLabel = clickLabel, onClick = onClick)))
+}
+
+@Composable
+internal fun TrackProgressTitle(title: String, fraction: Float, modifier: Modifier = Modifier) {
+    val base = MaterialTheme.colorScheme.surfaceContainerHigh
+    val fill = Color.White.copy(alpha = if (base.luminance() > .5f) .55f else .16f)
+    Box(modifier.heightIn(min = 52.dp).clip(CircleShape).background(base)
+        .drawBehind {
+            val width = size.width * fraction.coerceIn(0f, 1f)
+            val left = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) size.width - width else 0f
+            drawRect(fill, Offset(left, 0f), Size(width, size.height))
+        }.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Text(title, textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 

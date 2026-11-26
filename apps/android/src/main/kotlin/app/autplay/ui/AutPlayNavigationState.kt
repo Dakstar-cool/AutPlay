@@ -31,10 +31,10 @@ public class AutPlayNavigationState internal constructor(
         get() = stack.isNotEmpty()
 
     public fun navigate(destination: UiDestination) {
-        if (destination == current) return
         if (destination in UiDestination.compactNavigation) {
             stack.clear()
         } else {
+            if (destination == current) return
             stack.remove(destination)
             stack.add(current)
         }
@@ -42,10 +42,9 @@ public class AutPlayNavigationState internal constructor(
     }
 
     internal fun openLibraryDetail() {
-        if (current == UiDestination.NowPlaying) {
-            stack.add(current)
-            current = UiDestination.Library
-        } else navigate(UiDestination.Library)
+        if (current == UiDestination.Library) return
+        stack.add(current)
+        current = UiDestination.Library
     }
 
     public fun navigateBack(): Boolean {

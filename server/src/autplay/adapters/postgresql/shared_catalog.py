@@ -310,6 +310,25 @@ def ensure_catalog_refs(session: Session, user_id: UUID, picks: Sequence[RowMapp
     return refs
 
 
+def published_playback_handles(session: Session, owner: UUID) -> dict[UUID, dict[str, Any]]:
+    """Rebuild the same authorized recording hints on bootstrap as on initial publication."""
+    rows = session.execute(
+        text(f"""
+        SELECT u.user_track_ref_id, p.recording_id
+        FROM ({PUBLISHED_AUDIO}) p
+        JOIN library.user_track_ref_external_reference x USING(external_reference_id)
+        JOIN library.user_track_ref u USING(user_track_ref_id)
+        WHERE u.user_id=:owner AND u.deleted_at IS NULL AND u.recording_id IS NULL
+          AND x.relation_role='PRIMARY_SOURCE'
+    """),
+        {"owner": owner},
+    )
+    return {
+        ref: {"recording_id": str(recording), "resolution_status": "RESOLVED"}
+        for ref, recording in rows
+    }
+
+
 def playlist_catalog_handles(session: Session, owner: UUID) -> dict[UUID, dict[str, Any]]:
     """Resolution hints for saved MBIDs, scoped to currently authorized audio."""
     rows = session.execute(

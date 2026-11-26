@@ -1,5 +1,6 @@
 """One contained MusicBrainz GET after the parent commits an exact durable grant."""
 
+import json
 import os
 import re
 import sys
@@ -63,6 +64,28 @@ def execute(command: dict[str, object], destination: BinaryIO) -> None:
 
     http = PublicMetadataHttp(single_grant, proxy=os.environ.get("AUTPLAY_METADATA_PROXY"))
     try:
+        if parsed.netloc == "api.discogs.com" and parsed.path == "/database/search":
+            token = os.environ.get("AUTPLAY_DISCOGS_TOKEN")
+            if not token:
+                raise MetadataProviderError("discogs_search_unconfigured", retryable=False)
+            # This child handles one validated GET and never follows metadata redirects.
+            if token.startswith("{"):
+                pair = json.loads(token)
+                if (
+                    not isinstance(pair, dict)
+                    or set(pair) != {"consumer_key", "consumer_secret"}
+                    or not all(
+                        isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{10,128}", v)
+                        for v in pair.values()
+                    )
+                ):
+                    raise MetadataProviderError("metadata_discogs_auth_invalid", retryable=False)
+                credential = f"key={pair['consumer_key']}, secret={pair['consumer_secret']}"
+            else:
+                if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", token):
+                    raise MetadataProviderError("metadata_discogs_auth_invalid", retryable=False)
+                credential = f"token={token}"
+            http.client.headers["Authorization"] = "Discogs " + credential
         payload = http.cover_hop(url) if cover else http.get(url)
         write_packet(destination, b"R", {}, payload)
     finally:

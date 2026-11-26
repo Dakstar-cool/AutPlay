@@ -53,7 +53,7 @@ internal suspend fun indexLocalCollection(store: DesktopLibraryStore, tracks: Li
 
 @Composable
 internal fun DesktopLocalCollectionBrowser(data: LocalMusicIndex?, kind: DesktopCatalogKind, initialAlbum: LocalRelease?,
-    language: DesktopLanguage, play: (List<String>) -> Unit) {
+    language: DesktopLanguage, tracklist: (@Composable (LocalRelease) -> Unit)? = null, play: (List<String>) -> Unit) {
     val ru = language == DesktopLanguage.Russian
     if (data == null) { LinearProgressIndicator(); return }
     var artist by remember(kind) { mutableStateOf<String?>(null) }
@@ -76,6 +76,7 @@ internal fun DesktopLocalCollectionBrowser(data: LocalMusicIndex?, kind: Desktop
             label = { Text(if (ru) "Найти в коллекции" else "Find in collection") })
         val size: Int
         if (album != null) {
+            album?.takeIf { !it.album.isNullOrBlank() }?.let { tracklist?.invoke(it) }
             val rows = groups[album].orEmpty()
             val matches = rows.filter { it.track.title.contains(query, ignoreCase = true) }.sortedBy { it.track.title.lowercase() }
             size = matches.size

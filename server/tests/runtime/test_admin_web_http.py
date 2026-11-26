@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
+from autplay.application.vault_name_jobs import VaultNameJobs
 from autplay.application.web_admin import LoginChallenge
 from autplay.domain.admin_commands import AdminCommand
 from autplay.domain.admin_views import (
@@ -340,6 +343,8 @@ def _client(
     discovery_enabled: bool = False,
     discovery_automation_enabled: bool = False,
     mobile_api_origin: str | None = None,
+    name_jobs: VaultNameJobs | None = None,
+    acquisition_enabled: bool = False,
     origin: str = "https://admin.test",
 ) -> tuple[TestClient, _Web]:
     web = _Web()
@@ -354,6 +359,8 @@ def _client(
             renderer=renderer or _Renderer(),
             origin=origin,
             mobile_api_origin=mobile_api_origin,
+            name_jobs=name_jobs,
+            acquisition_enabled=acquisition_enabled,
             source_secret=b"s" * 32,
             discovery_enabled=discovery_enabled,
             discovery_automation_enabled=discovery_automation_enabled,
@@ -365,6 +372,37 @@ def _client(
 
 def _form(text: str) -> dict[str, str]:
     return dict(re.findall(r'name="([^\"]+)" value="([^\"]*)"', text))
+
+
+def test_operations_launch_from_dashboard_and_check_role_and_csrf() -> None:
+    jobs = Mock(spec=VaultNameJobs)
+    jobs.latest.return_value = None
+    client, web = _client(AdminTemplateRenderer(), name_jobs=jobs, acquisition_enabled=True)
+    client.cookies.set("__Host-autplay_admin", "session")
+    page = client.get("/admin/?lang=ru")
+    assert page.status_code == 200
+    form = re.search(
+        r'<form method="post" action="/admin/operations/normalize-names[^"]*">(.*?)</form>',
+        page.text,
+        re.S,
+    )
+    assert form and "Запустить нормализацию" in form[1]
+    assert "/admin/acquisition/track?lang=ru" in page.text
+    data = _form(form[1])
+    url = "/admin/operations/normalize-names?lang=ru"
+    headers = {"Origin": "https://admin.test"}
+    assert client.post(url, data=data, follow_redirects=False).status_code == 403
+    assert client.post(url, data={**data, "csrf_token": "bad"}, headers=headers).status_code == 403
+    jobs.request.assert_not_called()
+    result = client.post(url, data=data, headers=headers, follow_redirects=False)
+    assert result.status_code == 303 and result.headers["Location"].endswith("#music-operations")
+    jobs.request.assert_called_once_with(web.actor, UUID(data["operation_id"]))
+    jobs.latest.return_value = {"state": "RUNNING", "progress_current": 7, "progress_total": 12}
+    assert "7 / 12" in client.get("/admin/?lang=ru").text
+    web.actor = replace(web.actor, role=AccountRole.ADMIN)
+    assert "Запустить нормализацию" not in client.get("/admin/?lang=ru").text
+    assert client.post(url, data=data, headers=headers, follow_redirects=False).status_code == 403
+    assert jobs.request.call_count == 1
 
 
 def test_session_http_filters_are_validated_and_forwarded(monkeypatch: pytest.MonkeyPatch) -> None:

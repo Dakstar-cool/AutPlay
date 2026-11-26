@@ -19,6 +19,8 @@ class WeeklyArtistReleasesTest {
         }
         assertTrue(recommendedReleaseArtists(rows, List(5) { listens.first() }).isEmpty())
         assertEquals(1, recommendedReleaseArtists(rows, listens).size)
+        assertEquals(setOf("artist 1"), recommendedReleaseArtists(emptyList(), listens))
+        assertTrue(recommendedReleaseArtists(emptyList(), listens.take(2)).isEmpty())
         val artists = recommendedReleaseArtists(rows, activity)
         assertEquals(10, artists.size)
         val today = LocalDate.parse("2026-11-25")

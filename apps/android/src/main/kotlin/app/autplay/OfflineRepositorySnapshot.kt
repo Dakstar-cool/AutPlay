@@ -36,7 +36,6 @@ internal data class OfflineRepositorySnapshot(
     val downloadedTrackIds: Set<String>,
     val recentlyAdded: List<CoreHomeTrackSummary>,
     val recentlyPlayed: List<CoreHomeTrackSummary>,
-    val homePlaylists: List<CoreHomePlaylistSummary>,
     val activeQueue: CoreResumeQueueSummary?,
     val syncStatus: SyncStatus,
     val importProfileId: String,
@@ -77,8 +76,6 @@ internal fun rememberOfflineRepositorySnapshot(
         .collectAsState(initial = emptyList())
     val recentlyPlayed by remember(coreRepository, profileId) { coreRepository.recentlyPlayed(profileId) }
         .collectAsState(initial = emptyList())
-    val homePlaylists by remember(coreRepository, profileId) { coreRepository.homePlaylists(profileId) }
-        .collectAsState(initial = emptyList())
     val activeQueue by remember(coreRepository, profileId) { coreRepository.activeQueue(profileId) }
         .collectAsState(initial = null)
     val syncStatus by remember(binding, syncStatusRepository) {
@@ -103,7 +100,6 @@ internal fun rememberOfflineRepositorySnapshot(
         downloadedTrackIds,
         recentlyAdded,
         recentlyPlayed,
-        homePlaylists,
         activeQueue,
         syncStatus,
         importProfileId,

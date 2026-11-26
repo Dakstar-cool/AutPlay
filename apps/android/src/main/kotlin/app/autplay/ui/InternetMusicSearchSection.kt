@@ -21,6 +21,10 @@ import app.autplay.application.search.LibrarySearchKind
 import app.autplay.application.sync.ClientEventBinding
 import app.autplay.data.settings.applicationNonSecretSettingsStore
 import app.autplay.work.InternetMusicWork
+import app.autplay.ui.downloads.DownloadProgressRing
+import app.autplay.ui.downloads.liveTransferProgress
+import app.autplay.ui.downloads.progressPercent
+import app.autplay.ui.downloads.transferredSize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.flowOf
 
@@ -101,6 +105,7 @@ internal fun InternetMusicSearchSection(query: String, request: Int, kind: Libra
                 val completed = WorkInfo.State.SUCCEEDED in work.states
                 val failed = WorkInfo.State.FAILED in work.states && !completed
                 val downloading = work.downloadState in setOf("REQUESTED", "QUEUED", "DOWNLOADING")
+                val transfer = if (downloading || work.downloadState == "PAUSED") liveTransferProgress(work.transferId) else null
                 val status = when {
                     active -> stringResource(R.string.music_internet_adding)
                     downloading -> stringResource(R.string.music_device_downloading)
@@ -114,6 +119,12 @@ internal fun InternetMusicSearchSection(query: String, request: Int, kind: Libra
                 val duration = "${candidate.durationMs / 60000}:${(candidate.durationMs / 1000 % 60).toString().padStart(2, '0')}"
                 val vaultTrack = remember(candidate, vaultTracks) { matchingVaultTrack(candidate, vaultTracks) }
                 val acquiredId = work.localTrackId
+                fun acquire(download: Boolean) {
+                    val owner = profile ?: return
+                    if (session?.work != null) session.work.enqueue(owner.value, search.id, candidate.id, download)
+                    else InternetMusicWork.enqueue(context, owner.value, search.id, candidate.id, download)
+                }
+                val canDownload = !active && !failed && !downloading && work.downloadState !in setOf("COMPLETED", "PAUSED") && profile != null
                 val play: (() -> Unit)? = when {
                     vaultTrack != null && onPlayVault != null -> ({ onPlayVault(vaultTrack.id) })
                     acquiredId != null && onPlayAcquired != null -> ({ onPlayAcquired(acquiredId) })
@@ -124,14 +135,27 @@ internal fun InternetMusicSearchSection(query: String, request: Int, kind: Libra
                     artist = candidate.artist,
                     trackId = vaultTrack?.localTrackId,
                     onPlay = play,
-                    detail = listOfNotNull(candidate.provider, duration, status).joinToString(" · "),
+                    detail = listOfNotNull(candidate.provider, duration, status,
+                        transfer?.let { it.fraction?.let { fraction -> progressPercent(fraction) } ?: transferredSize(it) }
+                    ).joinToString(" · "),
                     emphasizeDetail = completed && !active && !downloading && work.downloadState !in setOf("FAILED", "PAUSED"),
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 ) {
-                    if (active || downloading) {
-                        CircularProgressIndicator(Modifier.size(20.dp).testTag("source-progress-${candidate.id}"), strokeWidth = 2.dp)
-                    } else if (completed && work.downloadState !in setOf("FAILED", "PAUSED")) {
-                        AutPlayPlatformIcon(AutPlayIcon.Check, null, Modifier.size(22.dp).testTag("source-ready-${candidate.id}"), tint = AutPlayTokens.colors.success)
+                    if (completed && !active && work.downloadState == null) {
+                        AutPlayPlatformIcon(AutPlayIcon.Check, stringResource(R.string.music_internet_added),
+                            Modifier.size(20.dp).testTag("source-ready-${candidate.id}"), tint = AutPlayTokens.colors.success)
+                    }
+                    Box(Modifier.size(48.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        when {
+                            active || downloading || work.downloadState == "PAUSED" ->
+                                DownloadProgressRing(transfer?.fraction, Modifier.size(38.dp).testTag("source-progress-${candidate.id}"),
+                                    running = active || work.downloadState == "DOWNLOADING")
+                            work.downloadState == "COMPLETED" -> AutPlayPlatformIcon(AutPlayIcon.Downloaded, stringResource(R.string.music_saved_offline),
+                                Modifier.size(25.dp).testTag("source-ready-${candidate.id}"), tint = MaterialTheme.colorScheme.primary)
+                            else -> IconButton(enabled = canDownload, onClick = { acquire(true) }) {
+                                AutPlayPlatformIcon(AutPlayIcon.Download, stringResource(R.string.music_add_download), Modifier.size(24.dp))
+                            }
+                        }
                     }
                     if (play != null) {
                         IconButton(onClick = play) {
@@ -139,16 +163,10 @@ internal fun InternetMusicSearchSection(query: String, request: Int, kind: Libra
                         }
                     }
                     TrackActionsMenu(Modifier.testTag("source-actions-${candidate.id}")) { dismiss ->
-                        fun acquire(download: Boolean) {
-                            dismiss()
-                            val owner = profile ?: return
-                            if (session?.work != null) session.work.enqueue(owner.value, search.id, candidate.id, download)
-                            else InternetMusicWork.enqueue(context, owner.value, search.id, candidate.id, download)
-                        }
                         DropdownMenuItem(text = { Text(stringResource(R.string.music_add_vault)) },
-                            enabled = !active && !completed && !failed && profile != null, onClick = { acquire(false) })
+                            enabled = !active && !completed && !failed && profile != null, onClick = { dismiss(); acquire(false) })
                         DropdownMenuItem(text = { Text(stringResource(R.string.music_add_download)) },
-                            enabled = !active && !failed && !downloading && work.downloadState !in setOf("COMPLETED", "PAUSED") && profile != null, onClick = { acquire(true) })
+                            enabled = canDownload, onClick = { dismiss(); acquire(true) })
                         if (failed) {
                             DropdownMenuItem(text = { Text(stringResource(R.string.music_retry)) },
                                 modifier = Modifier.testTag("source-acquisition-retry"), onClick = {

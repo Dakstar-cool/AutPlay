@@ -16,6 +16,7 @@ from uuid import UUID
 
 import rfc8785
 
+from autplay.domain.artist_affinity import liked_credit_weights
 from autplay.domain.recommendations import (
     MAX_PACK_BYTES,
     Candidate,
@@ -71,7 +72,7 @@ class BaselineUserRepresentation:
     """Small non-model representation prepared once per request."""
 
     version: str
-    liked_artists: frozenset[str]
+    liked_artists: dict[str, float]
     listened_artists: frozenset[str]
     liked_tokens: frozenset[str]
 
@@ -80,17 +81,28 @@ class BaselineUserRepresentationProvider:
     """Prepare explicit preference/history affinity without embeddings."""
 
     key = "baseline-user-representation"
-    version = "1"
+
+    def __init__(self, version: str = "1") -> None:
+        self.version = version
 
     def prepare(
         self, query: RecommendationQuery, snapshot: RecommendationInputSnapshot
     ) -> PreparedUserRepresentation:
         del query
-        liked = tuple(track for track in snapshot.tracks if track.preference == "LIKED")
+        liked = tuple(
+            track
+            for track in snapshot.tracks
+            if track.preference == "LIKED"
+            and (self.version == "1" or (track.authorized and not track.excluded))
+        )
         listened = tuple(track for track in snapshot.tracks if track.organic_play_count > 0)
         return BaselineUserRepresentation(
             version=self.version,
-            liked_artists=frozenset(track.artist_key for track in liked),
+            liked_artists=(
+                liked_credit_weights(snapshot.tracks, liked)
+                if self.version == "2"
+                else dict.fromkeys((track.artist_key for track in liked), 1.0)
+            ),
             listened_artists=frozenset(track.artist_key for track in listened),
             liked_tokens=frozenset(token for track in liked for token in track.metadata_tokens),
         )
@@ -104,6 +116,8 @@ class _BaseGenerator:
         self,
         tracks: Iterable[tuple[SnapshotTrack, float, dict[str, JsonValue]]],
         limit: int,
+        *,
+        version: str | None = None,
     ) -> tuple[Candidate, ...]:
         ordered = sorted(tracks, key=lambda row: (-row[1], row[0].recording_id.hex))[:limit]
         return tuple(
@@ -112,7 +126,7 @@ class _BaseGenerator:
                 (
                     CandidateContribution(
                         self.key,
-                        self.version,
+                        version or self.version,
                         rank,
                         round(score, 8),
                         provenance,
@@ -194,25 +208,39 @@ class ArtistReleaseMetadataCandidateGenerator(_BaseGenerator):
         del query
         prepared = cast(BaselineUserRepresentation, representation)
 
+        plays = sum(track.organic_play_count for track in snapshot.tracks)
+        cold_start_factor = 20 / (20 + plays)
+
         def rows() -> Iterable[tuple[SnapshotTrack, float, dict[str, JsonValue]]]:
             for track in snapshot.tracks:
-                artist_match = track.artist_key in prepared.liked_artists
+                starter = track.starter_artist_weight * 0.16 * cold_start_factor
+                artist_match = prepared.liked_artists.get(track.artist_key, 0.0)
                 history_artist = track.artist_key in prepared.listened_artists
                 token_overlap = len(set(track.metadata_tokens) & prepared.liked_tokens)
-                if not (artist_match or history_artist or token_overlap):
+                if not (artist_match or history_artist or token_overlap or starter):
                     continue
-                score = 0.55 + 0.3 * artist_match + 0.1 * history_artist + 0.02 * token_overlap
+                score = (
+                    0.55 + 0.3 * artist_match + 0.1 * history_artist + 0.02 * token_overlap
+                    if artist_match or history_artist or token_overlap
+                    else 0.0
+                ) + starter
                 yield (
                     track,
                     score,
                     {
-                        "artist_affinity": artist_match or history_artist,
+                        "artist_affinity": bool(artist_match or history_artist or starter),
+                        **({"artist_like_weight": artist_match} if prepared.version == "2" else {}),
+                        **(
+                            {"starter_artist_weight": track.starter_artist_weight}
+                            if starter
+                            else {}
+                        ),
                         "metadata_token_overlap": token_overlap,
                         "release_key": track.release_key,
                     },
                 )
 
-        return self._batch(rows(), limit)
+        return self._batch(rows(), limit, version=prepared.version)
 
 
 class FreshnessCandidateGenerator(_BaseGenerator):
@@ -227,35 +255,32 @@ class FreshnessCandidateGenerator(_BaseGenerator):
     ) -> Sequence[Candidate]:
         del query
         prepared = cast(BaselineUserRepresentation, representation)
-        affinity_artists = prepared.liked_artists | prepared.listened_artists
+        affinity_artists = prepared.liked_artists.keys() | prepared.listened_artists
         newest_release = max(
             (track.release_date_ordinal or 0 for track in snapshot.tracks), default=0
         )
-        return self._batch(
-            (
-                (
+
+        def rows() -> Iterable[tuple[SnapshotTrack, float, dict[str, JsonValue]]]:
+            for track in snapshot.tracks:
+                known_artist = track.artist_key in affinity_artists
+                if affinity_artists and not known_artist:
+                    continue
+                age = newest_release - (track.release_date_ordinal or 0)
+                recency = max(0.0, 1.0 - age / 730.0) if newest_release else 1.0
+                weight = prepared.liked_artists.get(track.artist_key, 1.0)
+                if track.artist_key in prepared.listened_artists:
+                    weight = 1.0
+                yield (
                     track,
-                    0.4
-                    + 0.6
-                    * (
-                        1.0
-                        if newest_release == 0
-                        else max(
-                            0.0,
-                            1.0 - (newest_release - (track.release_date_ordinal or 0)) / 730.0,
-                        )
-                    ),
+                    (0.4 + 0.6 * recency) * weight,
                     {
                         "release_date_ordinal": track.release_date_ordinal,
-                        "artist_affinity": track.artist_key in affinity_artists,
+                        "artist_affinity": known_artist,
                         "cold_start_fallback": not affinity_artists,
                     },
                 )
-                for track in snapshot.tracks
-                if not affinity_artists or track.artist_key in affinity_artists
-            ),
-            limit,
-        )
+
+        return self._batch(rows(), limit, version=prepared.version)
 
 
 class ExplorationCandidateGenerator(_BaseGenerator):
@@ -470,7 +495,7 @@ class StaticRecommendationVersionRegistry:
             return self._pipeline
         if (
             pipeline_key == DEFAULT_PIPELINE_KEY
-            and version in {"1", "2"}
+            and version in {"1", "2", "3"}
             and self._pipeline.pipeline_key == DEFAULT_PIPELINE_KEY
         ):
             return baseline_pipeline_definition(version)
@@ -483,17 +508,19 @@ class StaticRecommendationVersionRegistry:
 
 def baseline_pipeline_definition(version: str = "1") -> PipelineDefinition:
     """Return the immutable manifest identity for the initial CPU graph."""
-    recommendation_snapshot_limit(version)
+    budget = 1_000 if version == "1" else recommendation_snapshot_limit(version)
+    credit_version = "2" if version == "3" else "1"
+    filter_version = "1" if version == "1" else "2"
     component_specs = (
         ("preferences", "candidate_generator", "1"),
         ("history", "candidate_generator", "1"),
-        ("artist_release_metadata", "candidate_generator", "1"),
-        ("freshness", "candidate_generator", "1"),
+        ("artist_release_metadata", "candidate_generator", credit_version),
+        ("freshness", "candidate_generator", credit_version),
         ("exploration", "candidate_generator", "1"),
-        ("mandatory-filters", "filter", version),
+        ("mandatory-filters", "filter", filter_version),
         ("deterministic-heuristic-ranker", "ranker", "1"),
         ("deterministic-diversity-reranker", "reranker", "1"),
-        ("baseline-user-representation", "representation", "1"),
+        ("baseline-user-representation", "representation", credit_version),
     )
     components = tuple(
         ComponentVersionRef(
@@ -509,15 +536,13 @@ def baseline_pipeline_definition(version: str = "1") -> PipelineDefinition:
                     }
                 )
             ).hexdigest()
-            if kind == "filter" and version == "2"
+            if kind == "filter" and filter_version == "2"
             else _COMPONENT_CONFIG_SHA256,
         )
         for key, kind, component_version in component_specs
     )
     budgets = tuple(
-        (key, 1_024 if version == "2" else 1_000)
-        for key, kind, _ in component_specs
-        if kind == "candidate_generator"
+        (key, budget) for key, kind, _ in component_specs if kind == "candidate_generator"
     )
     pipeline = PipelineDefinition(
         pipeline_key=DEFAULT_PIPELINE_KEY,
@@ -589,12 +614,12 @@ class RecommendationPipelineRunner:
         self._filter = mandatory_filter
         self._ranker = ranker or DeterministicHeuristicRanker()
         self._reranker = reranker or DeterministicDiversityReranker()
-        self._representation = representation_provider or BaselineUserRepresentationProvider()
+        self._representation = representation_provider
 
     def _mandatory_filter(self, version: str) -> RecommendationFilter:
         if self._filter is not None:
             return self._filter
-        if version == "2":
+        if version in {"2", "3"}:
             return OwnerVerifiedRecommendationFilter()
         if version != "1":
             raise ReplayInputUnavailable
@@ -681,7 +706,10 @@ class RecommendationPipelineRunner:
         pipeline: PipelineDefinition,
     ) -> tuple[ScoredCandidate, ...]:
         """Return the bounded scored union used by candidate evaluation metrics."""
-        representation = self._representation.prepare(query, snapshot)
+        provider = self._representation or BaselineUserRepresentationProvider(
+            next(c.version for c in pipeline.components if c.kind == "representation")
+        )
+        representation = provider.prepare(query, snapshot)
         batches: list[Sequence[Candidate]] = []
         for key, budget in pipeline.generator_budgets:
             generator = self._generators.get(key)
@@ -918,7 +946,7 @@ def recommendation_snapshot_limit(policy_version: str) -> int:
     """Versioned capture bound; V2 freezes the complete Sona-sized universe."""
     if policy_version == "1":
         return RECOMMENDATION_MAX_SNAPSHOT_TRACKS
-    if policy_version == "2":
+    if policy_version in {"2", "3"}:
         return 1024
     raise ValueError("unsupported recommendation snapshot policy")
 
@@ -939,7 +967,11 @@ def recommendation_input_snapshot_document(
         "schema_version": int(policy_version),
         "user_id": str(owner_user_id),
         "interaction_watermark": interaction_watermark,
-        "selection_policy": f"most_recent_added_then_recording_id_v{policy_version}",
+        "selection_policy": (
+            f"starter_artist_then_recent_added_v{policy_version}"
+            if any(track.starter_artist_weight for track in tracks)
+            else f"most_recent_added_then_recording_id_v{policy_version}"
+        ),
         "max_tracks": limit,
         "tracks": [recommendation_snapshot_track_document(track) for track in tracks],
     }
@@ -991,6 +1023,12 @@ def recommendation_snapshot_track_document(track: SnapshotTrack) -> dict[str, Js
             None if track.user_track_ref_id is None else str(track.user_track_ref_id)
         ),
         "artist_key": track.artist_key,
+        **({"artist_acts": list(track.artist_acts)} if track.artist_acts else {}),
+        **(
+            {"starter_artist_weight": track.starter_artist_weight}
+            if track.starter_artist_weight
+            else {}
+        ),
         "release_key": track.release_key,
         "metadata_tokens": list(track.metadata_tokens),
         "availability": track.availability,

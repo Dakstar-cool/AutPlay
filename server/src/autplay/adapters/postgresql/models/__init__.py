@@ -69,6 +69,7 @@ from .identity import (
     ThresholdSetRow,
 )
 from .importing import (
+    CollectionImportRow,
     ImportEntryRow,
     ImportJobRow,
     WebImportOperationReceiptRow,
@@ -393,6 +394,7 @@ MAPPED_ROWS: tuple[type[Base], ...] = (
     UploadSessionRow,
     UploadChunkRow,
     ImportJobRow,
+    CollectionImportRow,
     ImportEntryRow,
     WebImportOperationReceiptRow,
     MatchDecisionRow,
@@ -458,6 +460,7 @@ __all__ = (
     "CatalogChangeSetRow",
     "CatalogDownloadRow",
     "CatalogExecutionRow",
+    "CollectionImportRow",
     "DeviceAdmissionExchangeReceiptRow",
     "DeviceAdmissionRateWindowRow",
     "DeviceAdmissionRow",

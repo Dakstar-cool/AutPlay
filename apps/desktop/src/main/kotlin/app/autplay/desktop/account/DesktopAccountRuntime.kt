@@ -101,7 +101,8 @@ public class DesktopAccountRuntime(
                 binding = active
                 mutable.value = DesktopAccountViewState(
                     phase = if (pending > 0 || (snapshot.activeBinding != null && active == null)) DesktopAccountPhase.OUTCOME_PENDING
-                        else if (active != null) DesktopAccountPhase.CONNECTED else DesktopAccountPhase.LOCAL,
+                        else if (active != null) DesktopAccountPhase.CONNECTED
+                        else if (selected != null) DesktopAccountPhase.READY else DesktopAccountPhase.LOCAL,
                     busy = true, publicId = publicId, recoveryExportRequired = recoveryAvailable && !exportAcknowledged,
                     pendingCount = pending, health = if (pending > 0) DesktopAccountHealth.PENDING else DesktopAccountHealth.UNKNOWN)
                 Unit
@@ -231,7 +232,7 @@ public class DesktopAccountRuntime(
                 response.use {
                     val bytes = it.bodyCopy()
                     val discovery = try { verified(D1.discovery(bytes, identity, Instant.now())) } finally { bytes.fill(0) }
-                    controlRequire(D1.Platform.MACOS in discovery.platforms, AccountControlFailure.UNSUPPORTED)
+                    controlRequire(D1.Platform.MACOS in discovery.platforms, AccountControlFailure.SERVER_CONNECTION_UNSUPPORTED)
                     val selection = AccountSelectedServer(confirmed, identity, discovery, localDataChoice)
                     binding?.let { owner -> requireTarget(owner, selection) }
                     selected = selection
@@ -926,8 +927,18 @@ internal fun freshSecret(size: Int): ByteArray {
     val bytes = ByteArray(size).also { SecureRandom().nextBytes(it) }
     return try { Base64.getUrlEncoder().withoutPadding().encode(bytes) } finally { bytes.fill(0) }
 }
-internal fun <T> verified(result: D1.Result<T>): T = (result as? D1.Result.Verified<T>)?.value
-    ?: throw AccountControlException(AccountControlFailure.UNSUPPORTED)
+internal fun <T> verified(result: D1.Result<T>): T = when (result) {
+    is D1.Result.Verified -> result.value
+    is D1.Result.Rejected -> throw AccountControlException(when (result.failure) {
+        D1.Failure.EXPIRED, D1.Failure.CLOCK_SKEW -> AccountControlFailure.EXPIRED
+        D1.Failure.IDENTITY_MISMATCH, D1.Failure.INVALID_SIGNATURE, D1.Failure.HASH_MISMATCH -> AccountControlFailure.TRUST_REQUIRED
+        D1.Failure.SCOPE_MISMATCH, D1.Failure.REVISION_ROLLBACK, D1.Failure.REVISION_CONFLICT,
+        D1.Failure.OBSERVATION_SCOPE_MISMATCH -> AccountControlFailure.CONTEXT_CHANGED
+        D1.Failure.UNSUPPORTED -> AccountControlFailure.SERVER_CONNECTION_UNSUPPORTED
+        D1.Failure.UNAVAILABLE -> AccountControlFailure.SERVER_UNAVAILABLE
+        D1.Failure.INVALID_JSON, D1.Failure.INVALID_DOCUMENT, D1.Failure.TOO_LARGE -> AccountControlFailure.INVALID_RESPONSE
+    })
+}
 internal fun <T> failed(code: AccountControlFailure): CompletableFuture<T> = CompletableFuture.failedFuture(AccountControlException(code))
 internal fun safeFailure(error: Throwable): AccountControlFailure {
     var cause = error
@@ -940,6 +951,7 @@ internal fun safeFailure(error: Throwable): AccountControlFailure {
             SecureStateStatus.OUTCOME_PENDING -> AccountControlFailure.CONFLICT
             SecureStateStatus.CAPACITY_REQUIRED -> AccountControlFailure.CAPACITY
             SecureStateStatus.CONTEXT_CHANGED -> AccountControlFailure.CONTEXT_CHANGED
+            SecureStateStatus.IDENTITY_UNAVAILABLE -> AccountControlFailure.LOCAL_IDENTITY_UNAVAILABLE
             else -> AccountControlFailure.TRUST_REQUIRED
         }
         else -> AccountControlFailure.TRANSPORT_UNAVAILABLE

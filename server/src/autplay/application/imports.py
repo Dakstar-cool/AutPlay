@@ -170,6 +170,8 @@ class ImportService:
         """Apply one explicit owner decision without resolving its UserTrackRef lineage."""
 
         with self._sessions() as session:
+            source_entry = session.get(ImportEntryRow, import_entry_id)
+            original_ref = source_entry.user_track_ref_id if source_entry else None
             result = PostgresImportRepository(session).review(
                 principal=principal,
                 import_job_id=import_job_id,
@@ -185,6 +187,11 @@ class ImportService:
                 entry = session.get(ImportEntryRow, import_entry_id)
                 if entry is None or entry.user_track_ref_id is None:
                     raise RuntimeError("resolved_import_missing_track_ref")
+                from autplay.application.collection_projection import project_reviewed_recording
+
+                project_reviewed_recording(
+                    session, principal.user_id, import_job_id, original_ref, result.recording_id
+                )
                 self._catalog_publisher.publish(
                     session, principal.user_id, ref_ids=(entry.user_track_ref_id,)
                 )

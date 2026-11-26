@@ -61,7 +61,8 @@ internal data class MainAdaptiveShellState(
     val downloadsActions: DownloadsUiActions,
     val legacyState: LegacySecondaryRouteState,
     val legacyActions: LegacySecondaryRouteActions,
-    val nowPlayingDownloadState: String? = null,
+    val nowPlayingDownload: app.autplay.application.download.DownloadIntentPresentation? = null,
+    val preparingDownloads: Set<String> = emptySet(),
     val playerConnection: PlayerServerConnection = PlayerServerConnection.Offline,
 )
 
@@ -90,7 +91,12 @@ internal fun MainAdaptiveShell(
     state: MainAdaptiveShellState,
     actions: MainAdaptiveShellActions,
 ) {
-    androidx.compose.runtime.CompositionLocalProvider(app.autplay.ui.LocalDeveloperMode provides state.legacyState.settings.developerMode) {
+    val trackDownloads = androidx.compose.runtime.remember(state.legacyState.downloads) {
+        state.legacyState.downloads.asReversed().associateBy { it.localUserTrackRefId }
+    }
+    androidx.compose.runtime.CompositionLocalProvider(app.autplay.ui.LocalDeveloperMode provides state.legacyState.settings.developerMode,
+        app.autplay.ui.downloads.LocalPreparingDownloads provides state.preparingDownloads,
+        app.autplay.ui.downloads.LocalTrackDownloads provides trackDownloads) {
     AutPlayAdaptiveShell(
         selectedDestination = state.destination,
         playerReturnDestination = state.previousDestination ?: UiDestination.Home,
@@ -174,7 +180,8 @@ internal fun MainAdaptiveShell(
             )
             UiDestination.NowPlaying -> NowPlayingRouteRenderer(
                 serverConnection = state.playerConnection,
-                downloadState = state.nowPlayingDownloadState,
+                downloadState = if (state.playerState.localTrackRefId in state.preparingDownloads) "REQUESTED" else state.nowPlayingDownload?.state,
+                transferId = state.nowPlayingDownload?.transferId,
                 state = state.playerState,
                 swipeTargets = state.homeSwipeTargets,
                 onPrevious = {

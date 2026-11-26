@@ -27,7 +27,11 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontWeight
+import app.autplay.ui.core.DetailTarget
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.autplay.application.artist.musicDisplayCredit
@@ -86,6 +90,18 @@ internal fun AutPlayTrackRow(
             }
         }
     }
+}
+
+@Composable
+internal fun ArtistCreditLine(artists: List<Pair<String, DetailTarget>>, onOpen: (DetailTarget) -> Unit) {
+    val credit = buildAnnotatedString {
+        artists.forEachIndexed { index, (name, target) ->
+            if (index > 0) append(", ")
+            withLink(LinkAnnotation.Clickable(target.stableId) { onOpen(target) }) { append(musicDisplayCredit(name)) }
+        }
+    }
+    Text(credit, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary,
+        maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 @Composable

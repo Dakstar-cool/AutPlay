@@ -12,6 +12,7 @@ import app.autplay.ui.core.LibrarySection
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
@@ -81,8 +82,13 @@ class LibrarySearchRefreshTest {
             }
         }
         compose.onNodeWithTag("library-add").assertIsDisplayed().performClick()
-        compose.onNodeWithTag("library-favorites").assertIsDisplayed()
-        compose.onNodeWithTag("library-downloads").assertIsDisplayed()
+        val toolbar = listOf("library-favorites", "library-device", "library-downloads", "library-sort", "library-add")
+            .map { compose.onNodeWithTag(it).assertIsDisplayed().getUnclippedBoundsInRoot() }
+        assertTrue(toolbar.zipWithNext().all { (left, right) -> left.right <= right.left && left.top == right.top })
+        val search = compose.onNodeWithTag("personal-library-search").getUnclippedBoundsInRoot()
+        val tabs = compose.onNodeWithTag("library-sections").getUnclippedBoundsInRoot()
+        assertTrue(search.bottom <= tabs.top && tabs.bottom < toolbar.first().top)
+        compose.onNodeWithText(context.getString(R.string.library_favorites_shortcut)).assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, imports); importing.value = true }
         compose.onNodeWithTag("library-add").assertIsNotEnabled()
     }
@@ -305,7 +311,7 @@ class LibrarySearchRefreshTest {
 
     private fun actions(play: (String) -> Unit, select: (String) -> Unit) = CoreProductRouteActions(
         openListenTogether = {}, recommendationVisible = {}, likeRecommendation = {}, dislikeRecommendation = {},
-        retryHome = {}, resumeHomeQueue = {}, openHomePlaylist = {}, openOffline = {}, openProblems = {},
+        retryHome = {}, resumeHomeQueue = {}, openOffline = {}, openProblems = {},
         changeQuery = {}, submitSearch = {}, playSearchResult = {}, changeVaultScope = {}, changeSearchAnchor = {},
         addLocal = {}, selectTrack = select, removeOrRestore = {}, likeTrack = {}, changeLibrarySection = {},
         changeLibrarySort = {}, changeLibraryFilter = {}, openCollection = { _, _ -> }, openDetail = {},

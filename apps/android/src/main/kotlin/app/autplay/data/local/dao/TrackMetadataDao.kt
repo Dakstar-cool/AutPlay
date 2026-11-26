@@ -13,8 +13,9 @@ data class ArtistPortraitSource(val ref: String, val image: String)
 
 @Dao
 interface TrackMetadataDao {
-    @Query("SELECT local_user_track_ref_id FROM track_metadata_projection WHERE server_profile_id = :profile AND local_user_track_ref_id IN (:ids) AND artwork_sha256 IS NOT NULL ORDER BY local_user_track_ref_id LIMIT 1")
-    suspend fun artworkTrack(profile: String, ids: List<String>): String?
+    @Query("""SELECT local_user_track_ref_id FROM track_metadata_projection WHERE server_profile_id=:profile
+        AND local_user_track_ref_id IN (:ids) AND artwork_sha256 IS NOT NULL""")
+    suspend fun tracksWithArtwork(profile: String, ids: List<String>): List<String>
 
     @Query("""SELECT u.server_user_track_ref_id AS ref, json_extract(m.payload_json,'$.catalog_artist_image_v1') AS image
         FROM track_metadata_projection m JOIN user_track_ref u USING(server_profile_id,local_user_track_ref_id)

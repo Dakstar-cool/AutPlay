@@ -16,6 +16,12 @@ forgotten content and controlled exploration. Mandatory authorization, availabil
 Dislike and taste-exclusion checks run before scoring. A diversity reranker limits repeated artists
 and releases.
 
+CPU baseline v3 treats a group with its own catalog artist ID as one act. Two separate IDs also
+share one like weight when they are the two primary artists on at least two release groups and
+the catalog has no independent or different-role recording or release-group credit for either.
+Each request retains the resolved acts for replay. Credits with missing or provisional member
+identities keep their whole-credit affinity.
+
 The served profile is deliberately stable and simple. It supports an empty-history user through
 freshness and exploration. R1A/R1B now compute owner-scoped maturity, per-direction confidence,
 multi-horizon recent interest, momentum and temporary fatigue as immutable replayable shadow
@@ -52,7 +58,7 @@ playback and readable local media do not synchronously depend on the server.
 
 | Signal/source | Current interpretation |
 | --- | --- |
-| Explicit Like | Strong candidate and artist/metadata affinity evidence |
+| Explicit Like | Strong track signal. For a collaboration, v3 assigns 65% of the artist signal to the first act and applies the same split to the remainder in billing order. The last act receives the balance. |
 | Explicit Dislike | Mandatory exclusion before scoring |
 | Exclude from taste | Mandatory taste exclusion; the event is not allowed to train affinity |
 | Organic listening history | Play counts, artist affinity and last-played evidence; recommended-only history is not treated as organic affinity |

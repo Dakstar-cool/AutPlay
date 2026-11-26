@@ -282,7 +282,7 @@ class OfflineRecommendationRepository(
                 "NO_USABLE_OFFLINE_PACK",
                 emptyMap(),
                 emptyList(),
-            )
+            ).withWeeklyReleases(binding, nowMs)
         }
 
         val localRows = dao.localCandidates(
@@ -315,12 +315,6 @@ class OfflineRecommendationRepository(
             loadOrCreateDelta(parentEntity, decoded, binding, baseItems, nowMs)
         }
         val sections = ranked.groupBy(HomeRecommendationItem::sectionKey)
-        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-        val artists = recommendedReleaseArtists(ranked, dao.releaseArtistActivity(
-            binding.serverProfileId.value, nowMs - 30L * 86_400_000, nowMs))
-        val releases = if (artists.isEmpty()) emptyList() else dao.recentRelevantReleases(
-            binding.serverProfileId.value, binding.userId.value, today.minusDays(6).toString(), today.toString(),
-        ).filter { isWeeklyArtistRelease(it.artist, it.releaseDateText, artists, today) }
         val status = when {
             ranked.isEmpty() -> "NO_LOCALLY_AVAILABLE_RECOMMENDATIONS"
             decoded.isStale -> "STALE_LOCAL_FALLBACK"
@@ -336,9 +330,23 @@ class OfflineRecommendationRepository(
             isStaleFallback = decoded.isStale,
             statusCode = status,
             recommendationSections = sections,
-            recentRelevantReleases = releases,
-            releaseArtists = artists,
-        )
+            recentRelevantReleases = emptyList(),
+        ).withWeeklyReleases(binding, nowMs)
+    }
+
+    private suspend fun HomeFeed.withWeeklyReleases(binding: ClientEventBinding, nowMs: Long): HomeFeed {
+        val profile = binding.serverProfileId.value
+        val cursor = database.syncDao().cursor(profile) ?: return this
+        if (cursor.deviceId != binding.deviceId.value ||
+            database.journalDao().lineageById(cursor.journalLineageId)?.userId != binding.userId.value) return this
+        val dao = database.recommendationPackDao()
+        val artists = recommendedReleaseArtists(recommendationSections.values.flatten(),
+            dao.releaseArtistActivity(profile, nowMs - 30L * 86_400_000, nowMs))
+        if (artists.isEmpty()) return this
+        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        val releases = dao.recentRelevantReleases(profile, binding.userId.value, today.minusDays(6).toString(), today.toString())
+            .filter { isWeeklyArtistRelease(it.artist, it.releaseDateText, artists, today) }
+        return copy(recentRelevantReleases = releases, releaseArtists = artists)
     }
 
     /** Immediate local unbinding boundary. Raw journal/library/media rows remain sealed in place. */

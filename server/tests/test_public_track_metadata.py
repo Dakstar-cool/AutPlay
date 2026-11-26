@@ -11,6 +11,7 @@ from autplay.adapters.media.track_metadata import fields_from_tags
 from autplay.adapters.public_track_metadata import (
     MusicBrainzMetadataProvider,
     PublicMetadataHttp,
+    _credit_members,
     validate_public_url,
 )
 from autplay.domain.track_metadata import MetadataQuery, automatic_candidate, parse_source_metadata
@@ -37,6 +38,29 @@ def recording(number: int, duration: int, releases: Iterable[int]) -> dict[str, 
         "score": 100,
         "releases": [{"id": str(UUID(int=i)), "title": "Album", "date": "1998"} for i in releases],
     }
+
+
+def test_featured_performers_share_the_credit_until_the_end_of_the_guest_list() -> None:
+    credit = [
+        {"artist": {"id": str(UUID(int=i)), "name": name}, "joinphrase": join}
+        for i, (name, join) in enumerate(
+            [
+                ("Lead", " & "),
+                ("Co-lead", " feat. "),
+                ("Guest", ", "),
+                ("Second", " & "),
+                ("Third", ""),
+            ],
+            start=1,
+        )
+    ]
+    assert [member["role"] for member in _credit_members(credit)] == [
+        "PRIMARY",
+        "PRIMARY",
+        "FEATURED",
+        "FEATURED",
+        "FEATURED",
+    ]
 
 
 def test_truncated_results_cannot_create_a_false_unique_match() -> None:
@@ -605,3 +629,26 @@ def test_search_continues_past_studio_hit_to_matching_session() -> None:
     match = automatic_candidate(query, MusicBrainzMetadataProvider(http).search(query))
     assert match and match.fields["mb_recording_id"] == str(UUID(int=2))
     assert len(http.urls) >= 2
+
+
+def test_joined_source_title_can_retrieve_a_spaced_instrumental_by_artist_and_duration() -> None:
+    query = MetadataQuery(
+        "icantbelieveiletyougetaway | High quality instrumental", "aldn", duration_ms=135941
+    )
+    spaced = "I can't believe I let you get away"
+
+    class ArtistHttp(Http):
+        def json(self, url: str, *, post: bytes | None = None) -> dict[str, Any]:
+            expression = parse_qs(urlsplit(url).query)["query"][0]
+            self.urls.append(expression)
+            row = recording(1, 135941, [10])
+            row.update(title=spaced, **{"artist-credit": [{"name": "aldn"}]})
+            if "recording:" in expression:
+                return {"count": 1, "recordings": [row]}
+            row.update(id=str(UUID(int=2)), disambiguation="instrumental")
+            return {"count": 1, "recordings": [row]}
+
+    http = ArtistHttp({})
+    match = automatic_candidate(query, MusicBrainzMetadataProvider(http).search(query))
+    assert match and match.fields["mb_recording_id"] == str(UUID(int=2))
+    assert http.urls[-1] == 'artist:"aldn" AND dur:[133941 TO 137941]'

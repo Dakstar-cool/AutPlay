@@ -7,6 +7,18 @@ open SQLite write transactions at startup. The worker may use its own reviewed i
 tag, so activating it does not replace images of the running API, stream or other
 workers. Preserve the image ID and source-snapshot identity in deployment evidence.
 
+## Album tracklist lookup
+
+The API serves the full edition at `GET /api/v1/music/discovery/album-tracklist` when internet music is enabled. It checks MusicBrainz first and follows an exact Discogs release link when the primary tracklist is unavailable. The album screen also accepts a Discogs release URL or numeric ID. These two Discogs paths work without a token.
+
+To enable Discogs search by artist and album title, mount a file containing the Discogs personal access token in the API service and set `AUTPLAY_DISCOGS_TOKEN_FILE` to its path in that service. The API reads the file at startup. Multiple candidate editions are returned for user selection. Vault marks are computed per account on each request. [Discogs developer documentation](https://www.discogs.com/developers/)
+
+An application key pair also works for catalogue search. In that case the same secret file contains one JSON object with the string fields `consumer_key` and `consumer_secret`. The catalogue child sends the credential only to the Discogs database search endpoint.
+
+For Compose deployments, set `AUTPLAY_RUNTIME_DISCOGS_TOKEN_FILE` to the absolute host path of the credential file in the deployment environment. Append `-f compose.discogs.yaml` after the other Compose files when validating, starting or upgrading the stack. The overlay gives `api` and `mobile-api` read-only access to the same credential. Keep the host file readable by the UID running those services.
+
+This application uses Discogs’ API but is not affiliated with, sponsored or endorsed by Discogs. ‘Discogs’ is a trademark of Zink Media, LLC.
+
 ## Track names and performer credits
 
 The upload path derives display names from the current release credit, local tags and the source label. Vault stores the public recording label when it accepts verified audio. The account receives its own metadata revision when its display fields change. A later enrichment or an existing Vault name rewrite uses the same rules.

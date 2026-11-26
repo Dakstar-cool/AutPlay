@@ -504,6 +504,7 @@ def test_migrated_database_has_exact_named_inventory(
             ("ml", "sona_collection_window"),
             ("catalog", "browse_page"),
             ("discovery", "catalog_download"),
+            ("importing", "collection_import"),
             ("discovery", "preservation_case"),
             ("discovery", "preservation_check"),
             ("discovery", "preservation_run"),
@@ -531,6 +532,7 @@ def test_migrated_database_has_exact_named_inventory(
             "self_pairing_v2_binding_commit",
             "ix_deletion_proof_user",
             "catalog_download_owner_idx",
+            "collection_import_owner_collection",
             "preservation_pending",
         }
     )

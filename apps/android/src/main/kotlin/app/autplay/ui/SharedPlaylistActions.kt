@@ -95,6 +95,17 @@ internal fun ImportPlaylistAction() {
     OutlinedButton(enabled = recipient != null, onClick = { opening = true }) {
         Text(stringResource(R.string.playlist_import_file))
     }
+    var externalLink by rememberSaveable(recipient) { mutableStateOf<String?>(null) }
+    var favorites by rememberSaveable(recipient) { mutableStateOf(false) }
+    OutlinedButton(enabled = recipient != null, onClick = { favorites = false; externalLink = "" }) {
+        Text(stringResource(R.string.ext_import))
+    }
+    OutlinedButton(enabled = recipient != null, onClick = { favorites = true; externalLink = "" }) {
+        Text(stringResource(R.string.ext_favorites))
+    }
+    if (recipient != null) externalLink?.let { initial ->
+        ExternalCollectionDialog(recipient, initial, favorites) { externalLink = null }
+    }
     if (settings != null && recipient == null) Text(stringResource(R.string.playlist_import_needs_account))
     if (opening) AutPlayDialog(
         onDismissRequest = { opening = false },
@@ -106,7 +117,10 @@ internal fun ImportPlaylistAction() {
         } },
         confirmButton = { TextButton(enabled = link.trim().let { it.startsWith("https://") || it.startsWith("http://") }, onClick = {
             operation = LocalId.random().value
-            uri = link.trim()
+            if (app.autplay.application.library.ExternalCollection.isProviderLink(link)) {
+                favorites = false
+                externalLink = link.trim()
+            } else uri = link.trim()
             opening = false
         }) { Text(stringResource(R.string.playlist_preview)) } },
         dismissButton = { TextButton(onClick = { opening = false }) { Text(stringResource(android.R.string.cancel)) } },

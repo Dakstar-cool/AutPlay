@@ -46,7 +46,7 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
     onOpenCatalog: ((DetailTarget) -> Unit)? = null,
     artistVisits: LruCache<CatalogArtistVisitKey, CatalogArtistVisit>? = null,
     artistOverview: app.autplay.ArtistOverview? = null, overviewLoading: Boolean = false,
-    onPlayHeardTrack: ((String) -> Unit)? = null) {
+    onPlayHeardTrack: ((String) -> Unit)? = null, selectArtistForDownload: Boolean = false, initialTitle: String? = null) {
     val context = LocalContext.current
     val settings by remember { applicationNonSecretSettingsStore(context).settings }.collectAsState(initial = null)
     val profile = if (session != null) session.binding?.serverProfileId else settings?.activeServerProfileId
@@ -264,7 +264,8 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
             target = parentArtist ?: initialTarget; releases = parentArtist != null; parentArtist = null; offset = 0; cards = emptyList(); page = null; selected = null; admitted = null
         }) { Text(stringResource(R.string.music_catalogue_back)) }
         if (session == null) target?.let { subject ->
-            CatalogDownloadAction(if (subject.entity == InternetMetadataDiscoveryEntity.ARTIST) "artist" else "release", subject.entityId)
+            CatalogDownloadAction(if (subject.entity == InternetMetadataDiscoveryEntity.ARTIST) "artist" else "release",
+                subject.entityId, initialTitle.takeIf { subject == initialTarget })
         }
         when {
             profile == null || user == null || device == null -> Text(stringResource(R.string.music_need_server))
@@ -293,7 +294,9 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
             val cover = rememberCatalogCover(target?.entityId)
             if (cover != null) AutPlayArtwork(scope.query, size = 124.dp, painter = cover)
         }
-        cards.forEach { card ->
+        val visibleCards = if (releases && target?.entity == InternetMetadataDiscoveryEntity.ARTIST)
+            cards.sortedWith(compareByDescending<InternetMetadataDiscoveryCard> { it.releaseDate }.thenBy { it.title }) else cards
+        visibleCards.forEach { card ->
             var visible by remember(card.id) { mutableStateOf(false) }
             Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth().onVisibilityChanged(minFractionVisible = 0.01f) { visible = it }
@@ -301,19 +304,17 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     val kind = card.browseTarget?.entity
                     if (session == null && (kind == InternetMetadataDiscoveryEntity.ARTIST || kind == InternetMetadataDiscoveryEntity.RELEASE)) {
-                        val photo = if (visible) rememberCatalogCover(card.entityId, portrait = kind == InternetMetadataDiscoveryEntity.ARTIST) else null
+                        val photo = if (visible && !selectArtistForDownload) rememberCatalogCover(card.entityId, portrait = kind == InternetMetadataDiscoveryEntity.ARTIST) else null
                         AutPlayArtwork(card.title, size = 72.dp, painter = photo)
                     }
                     Text(card.title, style = MaterialTheme.typography.titleMedium)
                     val partners = card.performerLinks().distinctBy { it.first }
                     if (partners.size > 1 && onOpenCatalog != null) {
-                        androidx.compose.foundation.layout.FlowRow {
-                            partners.forEach { (id, name) ->
-                                TextButton(onClick = { onOpenCatalog(DetailTarget(DetailKind.CatalogArtistTracks, id, name)) }) { Text(name) }
-                            }
-                        }
+                        ArtistCreditLine(partners.map { (id, name) ->
+                            name to DetailTarget(DetailKind.CatalogArtistTracks, id, name)
+                        }, onOpenCatalog)
                     } else card.artist?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                    listOfNotNull(card.releaseDate, card.country, card.disambiguation).takeIf { it.isNotEmpty() }
+                    listOfNotNull(releaseYear(card.releaseDate), card.country, card.disambiguation).takeIf { it.isNotEmpty() }
                         ?.let { Text(it.joinToString(" · "), style = MaterialTheme.typography.bodySmall) }
                     card.discNumber?.let { Text(stringResource(R.string.music_catalogue_disc, it), style = MaterialTheme.typography.bodySmall) }
                     card.trackNumber?.let { Text(stringResource(R.string.music_catalogue_track, it), style = MaterialTheme.typography.bodySmall) }
@@ -324,6 +325,10 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
                     }
                     card.recordingTitle?.takeIf { it != card.title }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     card.browseTarget?.let { browse ->
+                        if (selectArtistForDownload && browse.entity == InternetMetadataDiscoveryEntity.ARTIST) {
+                            CatalogDownloadAction("artist", browse.entityId, card.title)
+                            return@let
+                        }
                         TextButton(modifier = Modifier.testTag("catalogue-browse-${card.id}"), enabled = !loading, onClick = {
                             if (onOpenCatalog != null) {
                                 onOpenCatalog(DetailTarget(if (browse.entity == InternetMetadataDiscoveryEntity.ARTIST)
@@ -338,7 +343,7 @@ internal fun InternetMetadataDiscoverySection(query: String, kind: LibrarySearch
                             cards = emptyList(); page = null; selected = null; admitted = null
                         }) { Text(stringResource(R.string.library_section_albums)) }
                     }
-                    if (session == null && card.trackLookup != null) card.recordingId?.let { CatalogDownloadAction("recording", it) }
+                    if (session == null && card.trackLookup != null) card.recordingId?.let { CatalogDownloadAction("recording", it, card.title) }
                     if (card.trackLookup != null && onPlaylistTrack != null) TextButton(enabled = !contextLoading, onClick = {
                         selectionSequence++; selected = SelectedCatalogueTrack(card, selectionSequence, playlist = true)
                     }) { Text(stringResource(R.string.catalogue_add_to_playlist)) }
@@ -393,8 +398,9 @@ internal fun CatalogueErrorText(code: String?) {
         "music_catalogue_busy", "music_discovery_busy" -> R.string.music_catalogue_busy
         "music_catalogue_unavailable", "music_discovery_unavailable" -> R.string.music_catalogue_unavailable
         "music_catalogue_context_expired" -> R.string.music_catalogue_expired
-        "music_catalogue_context_not_found", "music_catalogue_entity_not_found" -> R.string.music_catalogue_unavailable_selection
+        "music_discovery_entity_not_found", "music_catalogue_context_not_found", "music_catalogue_entity_not_found", "catalog_download_missing" -> R.string.music_catalogue_unavailable_selection
         "music_operation_conflict" -> R.string.music_catalogue_conflict
+        "UNAVAILABLE" -> R.string.music_catalogue_unavailable
         else -> R.string.music_internet_error
     }
     Text(stringResource(message), color = MaterialTheme.colorScheme.error)
