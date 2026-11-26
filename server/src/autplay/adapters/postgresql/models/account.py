@@ -32,7 +32,10 @@ class UserAccountRow(Base):
         nullable=False,
         server_default=text("uuidv7()"),
     )
-    onboarding_artists: Mapped[list[UUID] | None] = mapped_column(ARRAY(PG_UUID(as_uuid=True)))
+    # Account recovery and consent also read this row on schemas predating artist onboarding.
+    onboarding_artists: Mapped[list[UUID] | None] = mapped_column(
+        ARRAY(PG_UUID(as_uuid=True)), deferred=True
+    )
     display_name: Mapped[str] = mapped_column(
         Text(),
         nullable=False,
