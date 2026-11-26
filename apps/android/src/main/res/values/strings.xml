@@ -17,7 +17,6 @@
     <string name="nav_profile">Profile</string>
     <string name="nav_privacy_data">Privacy and data</string>
     <string name="action_back">Back</string>
-    <string name="action_open_settings">Open settings</string>
 
     <string name="onboarding_sign_in_title">Sign in to your account</string>
     <string name="onboarding_welcome_title">Your local account</string>
@@ -34,16 +33,12 @@
 
     <string name="home_my_wave">My Wave</string>
     <string name="home_hero_open_player">Open the full player</string>
-    <string name="home_context_collections">Made for the moment</string>
     <string name="home_context_energy">High energy</string>
     <string name="home_context_running">For running</string>
     <string name="home_context_focus">Focus</string>
     <string name="home_context_evening">Evening</string>
     <string name="home_loading">Loading your local Home feed</string>
     <string name="home_offline_fallback">Offline recommendations are shown only for music available on this device.</string>
-    <string name="home_recently_added">Recently added</string>
-    <string name="home_playlists">Playlists</string>
-    <string name="home_offline_ready">Offline ready</string>
     <string name="home_offline_open">Open offline library</string>
     <string name="home_problems_open">Review</string>
     <plurals name="home_problem_total_count">
@@ -56,10 +51,7 @@
     <string name="search_hint">Search your library</string>
     <string name="search_action">Search</string>
     <string name="search_loading">Searching the local library…</string>
-    <string name="search_local_scope">Local</string>
-    <string name="search_vault_scope">Vault</string>
     <string name="search_vault_loading">Searching your personal Vault…</string>
-    <string name="search_vault_empty">No matching items in the personal Vault.</string>
     <string name="search_source_both_offline">On device and server · Offline</string>
     <string name="search_source_phone_offline">On device · Offline</string>
     <string name="search_source_server_online">On server · Internet required</string>
@@ -91,7 +83,6 @@
     <string name="library_sort_recent">Recently added</string>
     <string name="library_sort_title">Title</string>
     <string name="library_sort_artist">Artist</string>
-    <string name="library_filter_unavailable">Unavailable</string>
     <string name="library_artist_identity_unavailable">Artist browsing needs a stable artist identity. This build does not group artists by display name.</string>
     <string name="library_artists_loading">Loading artists from the owned catalog…</string>
     <string name="library_artists_empty">No artists with confirmed identity are available in this library yet.</string>
@@ -178,7 +169,6 @@
     <string name="state_playback_unavailable_title">Playback unavailable</string>
     <string name="track_untitled">Untitled track</string>
 
-    <string name="expanded_queue_title">Up next</string>
     <string name="queue_editor_title">Playback queue</string>
     <string name="queue_editor_empty">Add a track to build your queue.</string>
     <string name="queue_editor_unavailable">The queue is unavailable. Playback remains unchanged.</string>
@@ -528,10 +518,6 @@
     <string name="statistics_title">Listening statistics</string>
     <string name="statistics_loading">Calculating statistics…</string>
     <string name="statistics_empty">No listening sessions in this period yet.</string>
-    <plurals name="statistics_window_days">
-        <item quantity="one">Last %1$d day</item>
-        <item quantity="other">Last %1$d days</item>
-    </plurals>
     <plurals name="statistics_completed_window_days">
         <item quantity="one">Previous %1$d complete UTC day</item>
         <item quantity="other">Previous %1$d complete UTC days</item>

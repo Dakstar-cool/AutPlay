@@ -763,7 +763,7 @@ internal fun AutPlayBootstrap(
                                 val online by remember(context) {
                                     networkAvailability(context.getSystemService(android.net.ConnectivityManager::class.java))
                                 }.collectAsState(initial = false)
-                                app.autplay.ui.welcome.ArtistWelcomeDialog(
+                                app.autplay.ui.welcome.showArtistWelcomeDialog(
                                     online = online,
                                     ru = settings.appLanguage == "RU",
                                     pending = { AutPlayRuntime.serverFeatures(context, binding).artistWelcomePending() },

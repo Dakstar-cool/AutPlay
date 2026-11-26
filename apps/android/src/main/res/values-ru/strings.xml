@@ -17,7 +17,6 @@
     <string name="nav_profile">Профиль</string>
     <string name="nav_privacy_data">Приватность и данные</string>
     <string name="action_back">Назад</string>
-    <string name="action_open_settings">Открыть настройки</string>
 
     <string name="onboarding_sign_in_title">Вход в аккаунт</string>
     <string name="onboarding_welcome_title">Ваш локальный аккаунт</string>
@@ -34,16 +33,12 @@
 
     <string name="home_my_wave">Моя волна</string>
     <string name="home_hero_open_player">Открыть полный плеер</string>
-    <string name="home_context_collections">Подборки под момент</string>
     <string name="home_context_energy">Энергичное</string>
     <string name="home_context_running">Для бега</string>
     <string name="home_context_focus">Сосредоточиться</string>
     <string name="home_context_evening">Вечер</string>
     <string name="home_loading">Загружаем локальную Главную</string>
     <string name="home_offline_fallback">Офлайн-рекомендации показывают только музыку, доступную на этом устройстве.</string>
-    <string name="home_recently_added">Недавно добавлено</string>
-    <string name="home_playlists">Плейлисты</string>
-    <string name="home_offline_ready">Доступно офлайн</string>
     <string name="home_offline_open">Открыть офлайн-музыку</string>
     <string name="home_problems_open">Проверить</string>
     <plurals name="home_problem_total_count">
@@ -58,10 +53,7 @@
     <string name="search_hint">Поиск в медиатеке</string>
     <string name="search_action">Найти</string>
     <string name="search_loading">Идёт поиск в локальной медиатеке…</string>
-    <string name="search_local_scope">Локально</string>
-    <string name="search_vault_scope">Хранилище</string>
     <string name="search_vault_loading">Ищем в личном хранилище…</string>
-    <string name="search_vault_empty">В личном хранилище ничего не найдено.</string>
     <string name="search_source_both_offline">На телефоне и сервере · Офлайн</string>
     <string name="search_source_phone_offline">На телефоне · Офлайн</string>
     <string name="search_source_server_online">На сервере · Нужен интернет</string>
@@ -93,7 +85,6 @@
     <string name="library_sort_recent">Недавно добавленные</string>
     <string name="library_sort_title">Название</string>
     <string name="library_sort_artist">Исполнитель</string>
-    <string name="library_filter_unavailable">Недоступные</string>
     <string name="library_artist_identity_unavailable">Для просмотра исполнителей нужен стабильный идентификатор. Эта сборка не объединяет исполнителей по отображаемому имени.</string>
     <string name="library_artists_loading">Загружаем исполнителей из доступного каталога…</string>
     <string name="library_artists_empty">В этой медиатеке пока нет исполнителей с подтверждённой идентичностью.</string>
@@ -182,7 +173,6 @@
     <string name="state_playback_unavailable_title">Воспроизведение недоступно</string>
     <string name="track_untitled">Трек без названия</string>
 
-    <string name="expanded_queue_title">Далее</string>
     <string name="queue_editor_title">Очередь воспроизведения</string>
     <string name="queue_editor_empty">Добавьте трек, чтобы собрать очередь.</string>
     <string name="queue_editor_unavailable">Очередь недоступна. Воспроизведение не изменено.</string>
@@ -542,12 +532,6 @@
     <string name="statistics_title">Статистика прослушивания</string>
     <string name="statistics_loading">Считаем статистику…</string>
     <string name="statistics_empty">За этот период прослушиваний пока нет.</string>
-    <plurals name="statistics_window_days">
-        <item quantity="one">Последний %1$d день</item>
-        <item quantity="few">Последние %1$d дня</item>
-        <item quantity="many">Последние %1$d дней</item>
-        <item quantity="other">Последние %1$d дня</item>
-    </plurals>
     <plurals name="statistics_completed_window_days">
         <item quantity="one">Предыдущий %1$d полный день UTC</item>
         <item quantity="few">Предыдущие %1$d полных дня UTC</item>

@@ -28,7 +28,7 @@ internal fun insertRelated(rows: List<ArtistRow>, parent: String, artists: List<
 
 /** Returns true while the account welcome flow occupies the foreground. */
 @Composable
-fun ArtistWelcomeDialog(
+fun showArtistWelcomeDialog(
     ru: Boolean,
     pending: suspend () -> Boolean,
     browse: suspend (String?, String, List<String>) -> List<WelcomeArtist>,
@@ -62,7 +62,7 @@ fun ArtistWelcomeDialog(
         return true
     }
 
-    var selected by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    var selected by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
     var query by rememberSaveable { mutableStateOf("") }
     var roots by remember { mutableStateOf(emptyList<ArtistRow>()) }
     var results by remember { mutableStateOf(emptyList<ArtistRow>()) }
@@ -93,11 +93,14 @@ fun ArtistWelcomeDialog(
         catch (_: Exception) { failed = true }
         finally { loading = false }
     }
-    val firstVisible = rows.getOrNull(listState.firstVisibleItemIndex)
+    val firstVisible by remember(rows, listState) {
+        derivedStateOf { rows.getOrNull(listState.firstVisibleItemIndex) }
+    }
     LaunchedEffect(firstVisible, query) {
-        if (firstVisible == null || firstVisible.depth >= 3) return@LaunchedEffect
+        val visibleRow = firstVisible ?: return@LaunchedEffect
+        if (visibleRow.depth >= 3) return@LaunchedEffect
         val seen = rows.flatMap { it.artists }.map { it.id }
-        for (card in firstVisible.artists) {
+        for (card in visibleRow.artists) {
             if (card.id in cached) continue
             try { cached[card.id] = browseNow(card.id, "", seen) }
             catch (e: CancellationException) { throw e }
@@ -124,9 +127,9 @@ fun ArtistWelcomeDialog(
         }
     }
     fun toggle(id: String, depth: Int) {
-        if (id in selected) { selected = ArrayList(selected - id); return }
+        if (id in selected) { selected = selected - id; return }
         if (selected.size >= 60) return
-        selected = ArrayList(selected + id)
+        selected = selected + id
         expand(id, depth)
     }
     fun submit(ids: List<String>) {

@@ -2,6 +2,4 @@
 <resources>
     <string name="home_release_feed_title">New releases for you</string>
     <string name="home_release_feed_all">All new releases</string>
-    <string name="home_release_in_library">In your library</string>
-    <string name="home_release_known_artist">Your artists</string>
 </resources>

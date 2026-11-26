@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_wheel_preview">Предпросмотр подборки</string>
+    <string name="action_open_settings">Открыть настройки</string>
+    <string name="home_context_collections">Подборки под момент</string>
+    <string name="home_recently_added">Недавно добавлено</string>
+    <string name="home_playlists">Плейлисты</string>
+    <string name="home_offline_ready">Доступно офлайн</string>
+    <string name="search_local_scope">Локально</string>
+    <string name="search_vault_scope">Хранилище</string>
+    <string name="search_vault_empty">В личном хранилище ничего не найдено.</string>
+    <string name="library_filter_unavailable">Недоступные</string>
+    <string name="expanded_queue_title">Далее</string>
+    <plurals name="statistics_window_days">
+        <item quantity="one">Последний %1$d день</item>
+        <item quantity="few">Последние %1$d дня</item>
+        <item quantity="many">Последние %1$d дней</item>
+        <item quantity="other">Последние %1$d дня</item>
+    </plurals>
+</resources>

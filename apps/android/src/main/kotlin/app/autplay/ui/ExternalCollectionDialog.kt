@@ -1,7 +1,7 @@
 package app.autplay.ui
 
 import android.content.Intent
-import android.net.Uri
+import androidx.core.net.toUri
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
@@ -115,7 +115,7 @@ internal fun ExternalCollectionDialog(binding: ClientEventBinding, initialLink: 
                     }) { Text(name) }
                 }
                 page.authorization?.let { auth -> TextButton(onClick = {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(auth)))
+                    context.startActivity(Intent(Intent.ACTION_VIEW, auth.toUri()))
                 }) { Text(stringResource(R.string.ext_connect)) } }
                 if (page.state == "SAVED") Text(stringResource(R.string.ext_saved))
                 page.missingOccurrences?.takeIf { it > 0 }?.let { Text(stringResource(R.string.ext_missing, it)) }

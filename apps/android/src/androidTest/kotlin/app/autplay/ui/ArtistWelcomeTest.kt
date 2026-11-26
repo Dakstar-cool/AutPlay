@@ -7,7 +7,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import app.autplay.application.library.WelcomeArtist
-import app.autplay.ui.welcome.ArtistWelcomeDialog
+import app.autplay.ui.welcome.showArtistWelcomeDialog
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -20,7 +20,7 @@ class ArtistWelcomeTest {
         var saved: List<String>? = null
         fun cards(vararg names: String) = names.map { WelcomeArtist(it, it, "Song by $it") }
         ui.setContent {
-            ArtistWelcomeDialog(false, { true }, { parent, _, _ ->
+            showArtistWelcomeDialog(false, { true }, { parent, _, _ ->
                 check(imported)
                 when (parent) {
                     null -> cards("One", "Two", "Three")
@@ -42,7 +42,7 @@ class ArtistWelcomeTest {
     @Test fun canSkipBothStepsWithAnEmptyCatalog() {
         var saved: List<String>? = null
         ui.setContent {
-            ArtistWelcomeDialog(false, { true }, { _, _, _ -> emptyList() },
+            showArtistWelcomeDialog(false, { true }, { _, _, _ -> emptyList() },
                 { saved = it }, importFavorites = { error("Unexpected import") })
         }
         ui.onNodeWithText("Choose artists").performClick()

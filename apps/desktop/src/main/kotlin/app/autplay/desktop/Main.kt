@@ -1330,7 +1330,7 @@ public fun DesktopApp(
     }
     if (music != null && musicLease != null && !accountsVisible) key(music, musicLease) {
         val ru = language == DesktopLanguage.Russian
-        app.autplay.ui.welcome.ArtistWelcomeDialog(ru,
+        app.autplay.ui.welcome.showArtistWelcomeDialog(ru,
             pending = { music.artistWelcomePending(musicLease) },
             browse = { parent, query, seen -> music.welcomeArtists(musicLease, parent, query, seen) },
             finish = { ids -> music.finishArtistWelcome(musicLease, ids) },

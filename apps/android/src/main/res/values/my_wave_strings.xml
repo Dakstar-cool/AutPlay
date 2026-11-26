@@ -4,7 +4,6 @@
     <string name="home_my_wave_empty">No playable music right now. Add a local track, download music, or connect to your server.</string>
     <string name="home_my_wave_syncing">Your library is syncing. Try playback again when the first tracks appear.</string>
     <string name="home_wheel_sleep">Before sleep</string>
-    <string name="home_wheel_preview">Mix preview</string>
     <string name="home_wheel_play">Play · %1$s</string>
     <string name="home_wheel_unavailable">No recommendations are available for this mix right now.</string>
     <string name="home_wheel_calm">Calm</string>

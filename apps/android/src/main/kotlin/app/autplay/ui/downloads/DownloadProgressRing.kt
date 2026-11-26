@@ -90,12 +90,13 @@ internal fun progressPercent(fraction: Double): String {
 @Composable
 internal fun DownloadProgressRing(
     fraction: Double?,
-    modifier: Modifier = Modifier.size(52.dp),
+    modifier: Modifier = Modifier,
     showPercent: Boolean = true,
     running: Boolean = true,
 ) {
+    val ringModifier = modifier.size(52.dp)
     if (fraction == null && running) {
-        CircularProgressIndicator(modifier, strokeWidth = 3.dp)
+        CircularProgressIndicator(ringModifier, strokeWidth = 3.dp)
         return
     }
     val fill = MaterialTheme.colorScheme.primary
@@ -103,7 +104,7 @@ internal fun DownloadProgressRing(
     val target = (fraction ?: 0.0).toFloat().coerceIn(0f, 1f)
     val animated = animateFloatAsState(target, tween(if (running) 400 else 0, easing = LinearEasing), label = "Download progress")
     val semantics = if (fraction != null) Modifier.progressSemantics(target) else Modifier
-    Box(modifier.then(semantics), contentAlignment = Alignment.Center) {
+    Box(ringModifier.then(semantics), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
             val radius = (size.minDimension - stroke.width) / 2
